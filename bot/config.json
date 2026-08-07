@@ -1,0 +1,29 @@
+{
+    "api": {
+        "url": "http://localhost:10010/v2",
+        "api_key": "bot_pk_100_1eb2d65bd4291f886f3b6755b49dca48",
+        "api_secret": "cdb0786d2418608913c32d23668afb21ceb99fa0bad0ab1a52ec46b2bc7411fa",
+        "user_id": 100
+    },
+    "strategy": {
+        "symbols": [
+            {"symbol": "lbtc-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "eth-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "btc-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "gor-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "sol-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "trx-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "xht-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3},
+            {"symbol": "kas-usdt", "spread": 0.5, "order_size": 0.1, "min_price": 0.1, "max_price": 10.0, "levels": 3}
+        ],
+        "update_rate": "300s",
+        "order_lifetime": "60s",
+        "max_orders": 10,
+        "max_position": 10.0
+    },
+    "logging": {
+        "level": "info",
+        "format": "text",
+        "output": "/tmp/bot.log"
+    }
+}

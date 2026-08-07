@@ -1,0 +1,57 @@
+'use strict';
+
+const { Pair, Coin } = require('../../db/models');
+
+const getPairsFromDB = async (req, res) => {
+  try {
+    const pairs = await Pair.findAll({
+      where: {
+        active: true,
+        is_public: true
+      },
+      include: [
+        { model: Coin, as: 'base_coin', attributes: ['symbol'] },
+        { model: Coin, as: 'quote_coin', attributes: ['symbol'] }
+      ]
+    });
+
+    const result = {};
+
+    for (const p of pairs) {
+      const symbol = p.symbol;
+
+      result[symbol] = {
+        id: p.id,
+        symbol,
+        name: symbol,
+        code: symbol,
+
+        pair_base: p.base_coin.symbol,
+        pair_2: p.quote_coin.symbol,
+
+        active: true,
+        is_public: true,
+
+        increment_price: p.increment_price,
+        increment_size: p.increment_size,
+        min_size: p.min_size,
+        max_size: p.max_size,
+
+        maker_fee: p.maker_fees,
+        taker_fee: p.taker_fees,
+
+        // 🔴 ОБЯЗАТЕЛЬНО
+        estimated_price: p.estimated_price || '0'
+      };
+    }
+
+    return res.json(result);
+  } catch (err) {
+    console.error('getPairsFromDB error', err);
+    return res.status(500).json({ message: 'Failed to fetch pairs' });
+  }
+};
+
+module.exports = {
+  getPairsFromDB
+};

@@ -1,0 +1,5 @@
+import LANGUAGES from '../languages';
+
+export default {
+	SETTINGS_LANGUAGE_OPTIONS: LANGUAGES,
+};

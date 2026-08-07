@@ -1,0 +1,67 @@
+.donut-label-percentage {
+	font-size: 0.8rem;
+	font-weight: bold;
+	fill: $colors-black;
+}
+.donut-label-link {
+	font-size: 0.7rem;
+	font-weight: bold;
+	fill: $colors-notifications-blue;
+}
+
+.donut-label-no-price {
+	font-size: 9px;
+	font-weight: bold;
+	fill: $colors-black;
+	font-family: $raleway--font-family;
+}
+
+.donut-label-pair {
+	font-size: 1rem;
+	font-weight: bold;
+	fill: $colors-black;
+}
+
+.deposit-asset {
+	fill: $link;
+	font-weight: bold;
+}
+
+.chart_slice {
+	fill-opacity: 0.5;
+}
+
+.others-color {
+	fill: var(--labels_inactive-button);
+}
+
+.slice_active {
+	fill-opacity: 1;
+}
+
+@media (min-width: 1920px) {
+	.donut-label-pair {
+		font-size: 1.2rem;
+	}
+	.donut-label-percentage {
+		font-size: 1rem;
+	}
+}
+
+.layout-mobile {
+	.donut-label-pair {
+		font-size: 1.4rem;
+	}
+	.donut-label-percentage {
+		font-size: 1.2rem;
+	}
+	.donut-label-link {
+		font-size: 1rem;
+	}
+}
+
+@media (max-width: 768px) {
+	.donut-label-no-price {
+		font-size: 8px !important;
+	}
+}

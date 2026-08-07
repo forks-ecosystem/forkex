@@ -1,0 +1,10 @@
+--- price-oracle.go
++++ price-oracle.go
+@@ -144,6 +144,7 @@ func LoadPairsFromDB() ([]PairConfig, error) {
+     for rows.Next() {
+         var p PairConfig
++        var anchor sql.NullString
+         var updateInterval sql.NullString
+ 
+         err := rows.Scan(
+             &p.Symbol,

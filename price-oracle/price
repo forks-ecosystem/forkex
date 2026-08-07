@@ -1,0 +1,158 @@
+package main
+
+import (
+ "database/sql"
+ "encoding/json"
+ "fmt"
+ "log"
+ "math"
+ "math/rand"
+ "net/http"
+ "os"
+ "strconv"
+ "strings"
+ "time"
+
+ _ "github.com/lib/pq"
+)
+
+type Config struct {
+ BinancePollInterval string `json:"binance_poll_interval"`
+ ForkPollInterval    string `json:"fork_poll_interval"`
+ DBDSN               string `json:"db_dsn"`
+ Anchors             []string
+ Forks               []ForkConfig
+}
+
+type ForkConfig struct {
+ Symbol     string  `json:"symbol"`
+ Anchor     string  `json:"anchor"`
+ Multiplier float64 `json:"multiplier"`
+ Volatility float64 `json:"volatility"`
+}
+
+var db *sql.DB
+
+// ------------------ DB ------------------
+
+func SetMarketPrice(symbol string, price float64, source string) {
+ _, err := db.Exec(`
+  INSERT INTO market_prices(symbol, price, source)
+  VALUES ($1, $2, $3)
+  ON CONFLICT (symbol)
+  DO UPDATE SET price = $2, source = $3, updated_at = now()
+ `, symbol, price, source)
+
+ if err != nil {
+  log.Println("DB error:", err)
+ }
+}
+
+func GetMarketPrice(symbol string) float64 {
+ var price float64
+ err := db.QueryRow(
+  `SELECT price FROM market_prices WHERE symbol = $1`, symbol,
+ ).Scan(&price)
+
+ if err != nil {
+  return 0
+ }
+ return price
+}
+
+// ------------------ BINANCE ------------------
+
+func GetBinancePrice(symbol string) (float64, error) {
+ pair := strings.ToUpper(strings.ReplaceAll(symbol, "-", ""))
+ url := fmt.Sprintf(
+  "https://api.binance.com/api/v3/ticker/price?symbol=%s", pair,
+ )
+
+ resp, err := http.Get(url)
+ if err != nil {
+  return 0, err
+ }
+ defer resp.Body.Close()
+
+ var data struct {
+  Price string `json:"price"`
+ }
+
+ if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+  return 0, err
+ }
+
+ return strconv.ParseFloat(data.Price, 64)
+}
+
+// ------------------ ORACLE LOOPS ------------------
+
+func AnchorLoop(symbol string, interval time.Duration) {
+ ticker := time.NewTicker(interval)
+ for {
+  price, err := GetBinancePrice(symbol)
+  if err == nil && price > 0 {
+   SetMarketPrice(symbol, price, "binance")
+   log.Printf("[anchor] %s = %.8f\n", symbol, price)
+  }
+  <-ticker.C
+ }
+}
+
+func ForkLoop(cfg ForkConfig, interval time.Duration) {
+ ticker := time.NewTicker(interval)
+
+ for {
+  anchor := GetMarketPrice(cfg.Anchor)
+  if anchor == 0 {
+   <-ticker.C
+   continue
+  }
+
+  noise := (rand.Float64()*2 - 1) * cfg.Volatility
+  derived := anchor * cfg.Multiplier * (1 + noise)
+
+  last := GetMarketPrice(cfg.Symbol)
+  maxMove := last * 0.01 // 1% защита
+
+  if last > 0 && math.Abs(derived-last) > maxMove {
+   derived = last + math.Copysign(maxMove, derived-last)
+  }
+
+  SetMarketPrice(cfg.Symbol, derived, "derived")
+  log.Printf("[fork] %s = %.8f\n", cfg.Symbol, derived)
+
+  <-ticker.C
+ }
+}
+
+// ------------------ MAIN ------------------
+
+func main() {
+ rand.Seed(time.Now().UnixNano())
+
+ file, _ := os.ReadFile("oracle.json")
+ var cfg Config
+ json.Unmarshal(file, &cfg)
+
+ var err error
+ db, err = sql.Open("postgres", cfg.DBDSN)
+ if err != nil {
+  log.Fatal(err)
+ }
+
+ anchorInterval, _ := time.ParseDuration(cfg.BinancePollInterval)
+ forkInterval, _ := time.ParseDuration(cfg.ForkPollInterval)
+
+ for _, a := range cfg.Anchors {
+  go AnchorLoop(a, anchorInterval)
+ }
+
+ for _, f := range cfg.Forks {
+  go ForkLoop(f, forkInterval)
+ }
+
+ log.Println("🚀 price-oracle started")
+ select {}
+}
+

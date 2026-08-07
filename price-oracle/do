@@ -1,0 +1,21 @@
+services:
+  price-oracle:
+    image: price-oracle-price-oracle
+    container_name: price-oracle
+    restart: unless-stopped
+
+    env_file:
+      - /opt/forkex/.env
+
+    volumes:
+      - ./oracle.json:/app/oracle.json
+
+    environment:
+      TZ: UTC
+
+    networks:
+      - forkex-network
+
+networks:
+  forkex-network:
+    external: true

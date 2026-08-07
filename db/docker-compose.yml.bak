@@ -1,0 +1,56 @@
+# Prod HollaEx Kit Docker-Copmose
+services:
+  redis:
+    container_name: forkex-redis
+    image: redis:8.0.2-alpine
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    command: ["sh", "-c", "redis-server --requirepass $${REDIS_PASSWORD}"]
+    volumes:
+      - /opt/db/redis:/data
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 100M
+        reservations:
+          cpus: "0.1"
+          memory: 100M
+    networks:
+      - forkex-network
+  postgres:
+    container_name: forkex-db
+    image: postgres:14.9-alpine
+    restart: unless-stopped
+    volumes:
+      - /opt/db/postgresql:/var/lib/postgresql/data
+    env_file:
+      - /opt/forkex/.env
+    ports:
+      - "5454:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.6"
+          memory: 600M
+        reservations:
+          cpus: "0.1"
+          memory: 300M
+    networks:
+      - forkex-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${DB_USERNAME} -d $${DB_NAME} "]
+      #test: ["CMD-SHELL", "pg_isready -U forkex -d hollaex || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+      start_interval: 5s
+
+networks:
+  forkex-network:
+    external: true
+    name: forkex-network

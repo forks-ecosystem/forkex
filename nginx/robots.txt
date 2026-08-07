@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /v2/admin/
+Disallow: /plugins/admin/
+
+Sitemap: https://forkex.life/sitemap.xml

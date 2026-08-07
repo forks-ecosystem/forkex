@@ -1,0 +1,30 @@
+'use strict';
+
+const { Trade } = require('../db/models');
+const { Op } = require('sequelize');
+
+async function getPrice(symbol = null) {
+    try {
+        const where = {};
+        if (symbol) where.symbol = symbol;
+
+        const trades = await Trade.findAll({
+            where,
+            attributes: ['symbol', 'price', 'timestamp'],
+            order: [['timestamp', 'DESC']],
+            group: ['symbol']
+        });
+
+        const data = {};
+        trades.forEach(t => {
+            data[t.symbol] = parseFloat(t.price);
+        });
+
+        return data;
+    } catch (err) {
+        console.error('getPrice error:', err);
+        throw new Error('Failed to fetch price');
+    }
+}
+
+module.exports = { getPrice };

@@ -1,0 +1,17 @@
+services:
+  affiliation-service:
+    image: node:18-alpine
+    container_name: forkex-affiliation
+    working_dir: /app
+    volumes:
+      - ./affiliation-service.js:/app/aindex.js
+    ports:
+      - "10013:10013"
+    networks:
+      - forkex-network
+    command: node aindex.js
+
+networks:
+  forkex-network:
+    external: true
+

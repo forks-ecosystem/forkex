@@ -1,0 +1,228 @@
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    resolver 127.0.0.11 valid=30s;
+
+    upstream frontend { server forkex-web:80; }
+    upstream api { server forkex-api:10010; }
+    upstream plugins { server forkex-plugins:10012; }
+    upstream ws { server forkex-ws:10011; }
+    
+    # HTTP -> HTTPS
+    server {
+        listen 80;
+        server_name forkex.life www.forkex.life;
+        
+        location /.well-known/acme-challenge/ {
+            root /var/www/html;
+        }
+        
+        location / {
+            return 301 https://$server_name$request_uri;
+        }
+    }
+    
+    # HTTPS
+    server {
+        listen 443 ssl;
+        server_name forkex.life www.forkex.life;
+
+        ssl_certificate /etc/nginx/letsencrypt/forkex.life/fullchain.pem;
+        ssl_certificate_key /etc/nginx/letsencrypt/forkex.life/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        # Security headers
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+
+        # ========== КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА ==========
+        location /api/plugins {
+          proxy_pass      http://plugins;
+
+          rewrite /api(/|$)(.*) /$2 break;
+        }
+        # 1. /v2 (без слеша) - фронтенд запрашивает это
+        location = /v2 {
+            # Вариант A: Редирект на /v2/kit (что работает)
+            return 301 /v2/kit;
+            # Или Вариант B: Прокси на API
+            # proxy_pass http://api/v2;
+            # proxy_set_header Host $host;
+            # add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        # 2. /v2/ (со слешом)
+        location = /v2/ {
+            proxy_pass http://api/v2/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # 2b. Charts sparkline endpoint — proxy to API (must be before /v2/chart)
+        location /v2/charts {
+            proxy_pass http://api/v2/charts?$args;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # 2c. Chart endpoint — serve from local DB for custom pairs
+        location ~ ^/v2/chart(\?|$) {
+            proxy_pass http://172.18.0.1:8484/forkex/v2/chart.php?$args;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # /charts (sparklines for dashboard) — must be before /chart
+        location /charts {
+            proxy_pass http://api/v2/charts?$args;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # /chart (no /v2/ prefix) — frontend TradingView getBars hits this
+        location ~ ^/chart(\?|$) {
+            proxy_pass http://172.18.0.1:8484/forkex/v2/chart.php?$args;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # 2c. UDF endpoints for TradingView charting library
+        location /udf/config {
+            proxy_pass http://172.18.0.1:8484/forkex/udf.php?action=config;
+            proxy_set_header Host $host;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        location /udf/time {
+            proxy_pass http://172.18.0.1:8484/forkex/udf.php?action=time;
+            proxy_set_header Host $host;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        location /udf/symbols {
+            proxy_pass http://172.18.0.1:8484/forkex/udf.php?action=symbols&$args;
+            proxy_set_header Host $host;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        location /udf/history {
+            proxy_pass http://172.18.0.1:8484/forkex/udf.php?action=history&$args;
+            proxy_set_header Host $host;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+        }
+        # 3. Все остальные /v2/ пути
+        location /v2/ {
+            proxy_pass http://api/v2/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+            add_header Cache-Control "no-cache, no-store";
+
+            rewrite /api(/|$)(.*) /$2 break;
+        }
+        # 3b. /signup (self-referencing API calls without /v2/ prefix)
+        location /signup {
+            proxy_pass http://api/signup;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        # 3c. Frontend API calls that lack /v2/ prefix
+        location /minicharts {
+            proxy_pass http://api/v2/minicharts;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        location /kit {
+            proxy_pass http://api/v2/kit;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        location /order {
+            proxy_pass http://api/v2/order;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        # 4. WebSocket
+        location /stream {
+            proxy_pass http://ws/stream;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 86400s;
+        }
+        # 5. Статика
+        location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+        # 6. API для фронтенда (если использует /api/v2/)
+        location /api/v2/ {
+            rewrite ^/api/v2/(.*)$ /v2/$1 break;
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            add_header Content-Type "application/json; charset=utf-8" always;
+        }
+        # 7. Плагины
+        location /plugins {
+            proxy_pass http://plugins;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            rewrite /api(/|$)(.*) /$2 break;
+        }
+        location /charting_library/ {
+            proxy_pass http://172.18.0.1:8484/charting_library/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        }
+
+        # 8. Case-insensitive redirects for common URLs
+        location = /Markets { return 301 /markets; }
+        location = /Markets/ { return 301 /markets; }
+        location = /Convert { return 301 /quick-trade; }
+        location = /Convert/ { return 301 /quick-trade; }
+        location = /Covert { return 301 /quick-trade; }
+        location = /Covert/ { return 301 /quick-trade; }
+        location = /converT { return 301 /quick-trade; }
+        location = /converT/ { return 301 /quick-trade; }
+        location ~* ^/market$ { return 301 /markets; }
+        location ~* ^/market/$ { return 301 /markets; }
+
+        # 9. ВСЕ остальное - фронтенд
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # SPA поддержка
+            proxy_intercept_errors on;
+            error_page 404 = /index.html;
+        }
+    }
+}

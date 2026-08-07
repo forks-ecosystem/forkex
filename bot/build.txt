@@ -1,0 +1,4 @@
+go build -o bin/forkex-bot ./cmd/bot/
+
+
+./bin/forkex-bot

@@ -1,0 +1,204 @@
+{
+	"tr": {
+		"CONFIRM_EMAIL": {
+			"html": "<div><p><p>Sayın ${name} </p></p><p>Hesap güvenliğinizin kontrolünü gerektiren bir istekte bulundunuz. Bu işlemi gerçekleştirmek için, aşağıdaki kodla, bu işlemi onaylamanız gerekmektedir.<br /><p style=\"font-size: 1.2rem; text-align: center;\">${code}</p>Eğer bu isteği siz yapmadıysanız, acilen destek birimine raporlayınız ve şifrelerinizi değiştiriniz.</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Güvenlik Onayı"
+		},
+		"LOGIN": {
+			"html": "<div> <p> Sayın ${name} </p> <p> Hesabınıza aşağıdaki detaylarla bir giriş tesbit ettik </p> <div> <div>Saat: ${time}</div> <div>Ülke: ${country}</div> <div>IP Adresi: ${ip}</div> </div> <p> Eğer bu siz değilseniz, lütfen; şifrenizi değiştirin, 2 kademeli onay kurun (2FA), ve acilen bizimle kontak kurun. </p> <p> İyi dileklerimizle<br> ${api_name} takımı </p> </div>",
+			"title": "Giriş"
+		},
+		"SIGNUP": {
+			"html": "<div> <p> Sayın ${name} </p> <p> E-Posta adresinizi onaylamak için aşağıdaki butona tıklamanız gerekmektedir.<br> Eğer herhangi bir sorunuz varsa, bu e-postaya yanıt vererek bize ulaşmaktan çekinmeyiniz.</p><p>Lütfen kaydınızı onaylamak için, aşağıdaki butona tıklayınız..</p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Confirm</Button></a></div><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Kayıt"
+		},
+		"WELCOME": {
+			"html": "<div><p> Sayın ${name} </p><p> ${api_name} borsasına kayıt olduğunuz için teşekkür ederiz.</p><p>İşlem yapmaya başlamak için, öncelikle hesabınıza kripto para ya da banknot yatırmanız gerekmektedir. Lütfen <a href=\"${link_account}\" target=\"_blank\"> hesabınıza gidin</a> ve <a href=\"${link_deposit}\" target=\"_blank\"> yatırım sayfanızı ziyaret edin.</a>,</p><p>Eğer herhangi bir sorunuz olursa, lütfen bu e-postaya yanıt vererek bizimle kontak kurunuz.</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hoşgeldiniz"
+		},
+		"RESET_PASSWORD": {
+			"html": "<div><p> Sayın ${name} </p><p>Hesap şifrenizi sıfırlamak için bir istekte bulundunuz.<br />Şifrenizi güncellemek için, lütfen aşağıdaki linke tıklayınız.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Şifremi Yenile</Button></a></div><p>Eğer bu isteği yanlışlıkla yaptıysanız, bir şey yapmanıza gerek yok; hesabınızda herhangi bir değişiklik olmayacaktır.</p><p>İsteğin geldiği adres: ${ip}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Şifre Sıfırlama İsteği"
+		},
+		"ACCOUNT_VERIFY": {
+			"html": "<div><p> Sayın ${name} </p><p>Tebrikler. Hesabınız başarıyla onaylandı.</p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Trade Now</Button></a></div><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hesap Onaylandı"
+		},
+		"ACCOUNT_UPGRADE": {
+			"html": "<div><p> Sayın ${name} </p><p>Tebrikler. Hesap erişiminiz ${tier} seviyesine yükseltildi. Artık daha düşük komisyon ödeyecek, daha yüksek çekim yapabilecek ve diğer bazı premium özelliklere erişeceksiniz.</p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Şimdi İşlem Yap</Button></a></div><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hesap Yükseltildi"
+		},
+		"DEPOSIT_CANCEL": {
+			"html": "<div><p> Sayın ${name} </p><p> ${date} tarihinde yapılan, ${amount} miktarındaki, ${currency} yatırımınızı bulamadık ya da işleyemedik. Dolayısıyla, işlem sistem tarafından reddedildi.</p><p>Eğer merak ettiğiniz bir şey varsa, bu e-postaya yanıt verebilirsiniz</p><p>İşlem ID: ${txid}<br />Miktar: ${amount}<br />Durum: Reddedildi</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Yatırımı Reddedildi"
+		},
+		"WITHDRAWAL_CANCEL": {
+			"html": "<div><p> Sayın ${name} </p><p> ${date} tarihinde yapılan, ${amount} miktarındaki, ${currency} çekiminizi bulamadık ya da işleyemedik. Dolayısıyla, işlem reddedildi ve transfer bekleyen bakiyeniz ${api_name} cüzdanınıza geri yatırıldı.</p><p>Eğer merak ettiğiniz bir şey varsa, bu e-postaya yanıt verebilirsiniz</p><p>İşlem ID: ${txid}<br />Miktar: ${amount}<br />Durum: Reddedildi</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Çekimi Reddedildi"
+		},
+		"WITHDRAWAL_REQUEST": {
+			"html": "<div><p> Sayın ${name} </p><p> ${address} adresine, ${amount} miktarında, ${currency} çekim isteğinde bulundunuz. <br /><br />Miktar: ${amount} ${currency}<br />Ücret: ${fee} ${fee_coin}<br />Adres: ${address}<br /><span id=\"network\">Ağ: ${network}</span><br /><br />Çekimi onaylamak için, lütfen aşağıdaki butona tıklayınız.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Onay</Button></a></div><p>Eğer bu isteği yanlışlıkla yaptıysanız, hiç bir şey yapmanıza gerek yoktur, hesabınızda bir değişiklik olmayacaktır.</p><p>İsteğin geldiği kaynak: ${ip}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Çekim İsteği"
+		},
+		"USER_VERIFICATION": {
+			"html": "<div><h3>Kullanıcı Onayı Gerekmektedir</h3><div> \"${email}\" kullanıcısı, onay için belgelerini yüklemiştir. Lütfen dökümanlarını inceleyiniz.</div></div>",
+			"title": "Kullanıcı Onayı"
+		},
+		"SUSPICIOUS_DEPOSIT": {
+			"html": "<div><h3>Şüpheli Yatırım</h3><div> ${email} adresine sahip kullanıcı, hesabına ${currency} cinsinden şüpheli bir yatırım almıştır..<br />İşlem ID: ${txid}<h4>İşlem datası:</h4><div>${data}</div></div></div>",
+			"title": "Şüpheli Yatırım"
+		},
+		"INVALID_ADDRESS": {
+			"html": "<div><p> Sayın ${name} </p><p> ${amount} miktarındaki,  ${currency} çekiminiz hatalı adrese gönderilmiş ve iptal edilmiştir .</p><p>Adres: ${address}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hatalı Çekim Adresi"
+		},
+		"USER_DEACTIVATED": {
+			"html": "<div><p> ${email} hesabınız kilitlenmiştir. Borsa yöneticisi tekrar aktifleyene kadar, hesabınızı kullanamayacaksınız.</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hesap ${type}"
+		},
+		"USER_ACTIVATED": {
+			"html": "<div><p> ${email} hesabınız aktiflenmiştir. Hesabınızı kullanabilirsiniz.</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Hesap ${type}"
+		},
+		"DISCOUNT_UPDATE": {
+			"html": "<div><p> Sayın ${name} </p><p>İndirim oranınız % ${rate} olarak değiştirilmiştir. Bu oran, işlem komisyonlarınıza indirim olarak uygulanacaktır.</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "İndirim Oran Değişimi"
+		},
+		"BANK_VERIFIED": {
+			"html": "<div><p> Sayın ${name} </p><p>İnceleme sürecindeki banka hesabınız onaylanmıştır. Geçerli hesabınız, banka hesabı gerektiren borsa işlemlerinde kullanılabilecektir.</p><div><strong>Onaylı Banka Hesapları:</strong>${list_detail_bank_account}</div><p><a href=\"${link_verification}\">Mevcut banka hesaplarınızı görüntülemek için, lütfen borsanın onay bölümüne bakınız.</a></p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Banka Onayı"
+		},
+		"USER_ID_VERIFICATION_REJECT": {
+			"html": "<div><p> Sayın ${name} </p><p>Kimlik onayı başvurunuz incelendi ve ne yazık ki reddedildi. Yapmanız gerekenler için, lütfen aşağıdaki yetkili mesajını okuyunuz:</p><p>Mesaj: ${message}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Kimlik Onayı Reddedildi"
+		},
+		"USER_BANK_VERIFICATION_REJECT": {
+			"html": "<div><p> Sayın ${name} </p><p>Yeni banka kaydınız incelendi ve ne yazık ki reddedildi. Yapmanız gerekenler için, lütfen aşağıdaki yetkili mesajını okuyunuz:</p><p>Mesaj: ${message}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Yeni Banka Başvurusu Reddedildi"
+		},
+		"PASSWORD_CHANGED": {
+			"html": "<div><p> Sayın ${name} </p><p>Bu e-posta, şifrenizin değiştiğini onaylamaktadır. Başka bir işlem yapmanıza gerek yoktur.<br />Eğer bu değişikliği onaylamıyorsanız, lütfen bizimle acilen irtibat kurunuz.<br /></p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Şifre Değişti"
+		},
+		"CHANGE_PASSWORD": {
+			"html": "<div><p> Sayın ${name} </p><p>Şifrenizi değiştirmek için bir istekte bulundunuz.<br />Şifre değişiminizi onaylamak için, lütfen aşağıdaki linke tıklayınız.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Şifre Değişimini Onayla</Button></a></div><p>Eğer bu isteği yanlışlıkla yapmışsanız, görmezden gelebilirsiniz; hesabınızda herhangi bir değişiklik olmayacaktır.</p><p>İsteğin geldiği kaynak: ${ip}</p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "Şifre Değişim Onayı"
+		},
+		"CHANGE_PASSWORD_CODE": {
+			"html": "<div><p> Sayın ${name} </p><p>Hesabınızın <strong>şifresini değiştirme</strong> talebinde bulundunuz.<br />Bu değişikliği onaylamak için aşağıdaki doğrulama kodunu kullanın.</p><div style=\"padding:1rem;background-color:#f5f5f5;border:1px dashed #999;font-family:monospace;font-size:1.5rem;letter-spacing:4px;text-align:center;margin-bottom:20px;\">${confirmation_code}</div><p>Bu kodu şifre değişikliği onay ekranına giriniz. Kod sınırlı süre için geçerlidir.</p><p>Eğer <strong>bu siz değilseniz</strong>, lütfen <a href=\"${freeze_account_link}\">hesabınızı hemen dondurun</a> ve destek ile iletişime geçin.</p><p><strong>Not:</strong> Güvenlik amacıyla, şifre değişikliğinden sonra 24 saat boyunca çekimler kısıtlanır.</p><p>İsteğin geldiği adres: ${ip}</p><p>Saygılarımızla<br>${api_name} ekibi</p></div>",
+			"title": "Şifre Değişikliği Doğrulama Kodu"
+		},
+		"DEPOSIT_PENDING": {
+			"html": "<div><div><p> Sayın ${name} </p><p> ${api_name} cüzdanınızda bekleyen, ${amount} ${currency} yeni yatırımınız vardır. Lütfen işlem onaylanana kadar bekleyiniz. Onay sonrası, fonlarınız cüzdanınıza işlenecektir. Yatırımınızın blokzincirde ${confirmation} adet onaya ihtiyacı vardır.</p><p>Miktar: ${amount} ${currency}<br />Statü: ${status}<br />Adres: ${address}<br />İşlem ID: ${transaction_id}<br /><span id=\"network\">Ağ: ${network}</span><br />Ücret: ${fee} ${fee_coin}<br /><ul>${explorers}</ul></div><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Yatırımı Bekliyor"
+		},
+		"DEPOSIT_COMPLETED": {
+			"html": "<div><div><p> Sayın ${name} </p><p> ${currency} cinsinden, ${amount} ${currency} yatırımınız onaylanmış ve tamamlanmıştır. Bakiyenize, ${currency} cüzdanınızdan erişebilirsiniz.</p><p>Miktar: ${amount} ${currency}<br />Durum: ${status}<br />Adres: ${address}<br />İşlem ID: ${transaction_id}<br /><div id=\"network\">Ağ: ${network}</div><br />Ücret: ${fee} ${fee_coin}<br /><ul><div id=\"explorers\">${explorers}</div></ul></div><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Yatırımı Tamamlandı"
+		},
+		"WITHDRAWAL_PENDING": {
+			"html": "<div><p> Sayın ${name} </p><p> ${amount} ${currency} için çekim isteğinde bulundunuz. Çekim talebiniz işlemdedir ve kısa süre içerisinde onaylanacaktır.</p><p>Miktar: ${amount} ${currency}<br />Ücret: ${fee} ${fee_coin}<br />Durum: ${status}<br />Adres: ${address}<br />İşlem ID: ${transaction_id}<br /><span id=\"network\">Ağ: ${network}</span><br /><ul>${explorers}</ul><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Çekimi Bekliyor"
+		},
+		"WITHDRAWAL_COMPLETED": {
+			"html": "<div><p> Sayın ${name} </p><p> ${amount} ${currency} için çekiminiz tamamlanmıştır.</p><p>Miktar: ${amount} ${currency}<br />Ücret: ${fee} ${fee_coin}<br />Durum: ${status}<br />Adres: ${address}<br />İşlem ID: ${transaction_id}<br /><span id=\"network\">Ağ: ${network}</span><br /><ul>${explorers}</ul><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "${currency} Çekimi Tamamlandı"
+		},
+		"DOC_REJECTED": {
+			"html": "<div><p>Sayın ${email} </p><p>Maalesef, yüklediğiniz KYC dökümanları reddedildi.<br>Belgelerinizin reddedilme sebepleri aşağıda listelenmiştir.<br></p><div><ul>${doc_information}</ul></div><p>Eğer, belgelerinizin reddedilme sebeplerinde bir hata olduğunu düşünüyorsanız, lütfen bu e-posta adresine yanıt veriniz.<br>Eğer bir hata yoksa, tüm geçerli dökümanlarınızı tekrar yüklemeniz gerekmektedir.</p><p> Regards<br> ${api_name} takımı </p</div>",
+			"title": "KYC Belgeleri Reddedildi"
+		},
+		"DOC_VERIFIED": {
+			"html": "<div><p>Sayın ${email} </p><p>Yüklediğiniz KYC belgeleriniz onaylandı.<br>Artık, kimlik onayı isteyen tüm borsa seçeneklerine erişiminiz açılmıştır.</p><ul>${doc_information}</ul><p>Onaylanan dökümanlarınızı görüntülemek için, lütfen <a href=\"${link}\" target=\"_blank\"> onay sayfanızı ziyaret ediniz.</a></p><p> İyi dileklerimizle<br> ${api_name} takımı </p></div>",
+			"title": "KYC Belgeleri Onaylandı"
+		},
+		"LOCKED_ACCOUNT": {
+			"html": "<div><p><p>Sayın ${name} </p></p><p>Hesabınız çok fazla giriş denemesi nedeniyle ${login_timeout} dakika süreyle kilitlendi.<br />Eğer bu giriş denemelerini yapmadıysanız, bunu hemen bildirin ve kimlik bilgilerinizi mümkün olan en kısa sürede değiştirmeye devam edin.</p><p> Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "Hesabınız Kilitlendi"
+		},
+		"USER_DELETED": {
+			"html": "<div><p><p>Sayın ${name} </p></p><p>Hesap silme talebi devam ediyor. Hesabınızdaki bilgiler hizmet şartlarına göre kaldırılacaktır.</p><p> Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "Hesap Silme Talebi"
+		},
+		"SUBACCOUNT_REMOVED": {
+			"html": "<div><p>Merhaba ${name}</p><p><strong>${sub_email}</strong> alt hesabı hesabınızdan kaldırılmıştır.</p><p>Not: Alt hesap devre dışı bırakılmıştır ve artık platforma erişemez. Bu işlem isteğiniz dışında gerçekleştiyse lütfen destek ile iletişime geçin.</p><p> Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "Alt Hesap Kaldırıldı"
+		},
+		"OTP_DISABLED": {
+			"html": "<div> <p> Sayın ${name} </p> <p> Hesabınızda <b>iki faktörlü kimlik doğrulama (2FA) devre dışı bırakıldı</b> olarak kaydedilmiştir. Hesabınızı güvence altına almak için lütfen yeniden 2FA etkinleştirin.</p> <div> <div>Zaman: ${time}</div> <div>Ülke: ${country}</div> <div>IP Adresi: ${ip}</div> </div> <p> Bu siz değilseniz lütfen derhal bizimle iletişime geçin. </p> <p> Saygılarımla<br> ${api_name} Ekibi </p> </div>",
+			"title": "OTP Devre Dışı"
+		},
+		"OTP_ENABLED": {
+			"html": "<div> <p> Sayın ${name} </p> <p> Hesabınızda <b>iki faktörlü kimlik doğrulama (2FA) etkinleştirildi</b> olarak kaydedilmiştir.</p> <div> <div>Zaman: ${time}</div> <div>Ülke: ${country}</div> <div>IP Adresi: ${ip}</div> </div> <p> Saygılarımla<br> ${api_name} Ekibi </p> </div>",
+			"title": "OTP Etkin"
+		},
+		"P2P_MERCHANT_IN_PROGRESS": {
+			"html": "<div><p> Sevgili ${name} </p><p>P2P işleminizde bir aktivite tespit ettik, bu da bir müşterinin sizinle işlem yapmak istediğini gösterebilir. İşleminizin durumunu kontrol etmek için lütfen aşağıdaki bağlantıya tıklayın:<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">İşlem Durumunu Kontrol Edin</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P İşleminizle İlgili Güncelleme"
+		},
+		"P2P_BUYER_PAID_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>Siparişinizi ödenmiş olarak işaretlediniz. Satıcının kontrol etmesini, onaylamasını ve fonları serbest bırakmasını bekliyoruz<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_ORDER_EXPIRED": {
+			"html": "<div><p> Sevgili ${name} </p><p>Belirtilen süre içinde aktivite olmadığı için siparişinizin süresi doldu.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_ORDER_CLOSED": {
+			"html": "<div><p> Sevgili ${name} </p><p>Destek ekibimiz, itiraz talebi hakkında bir karara vardıktan sonra siparişinizi kapattı<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_BUYER_CANCELLED_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>Siparişinizi iptal ettiniz. İşlem kapatıldı.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_BUYER_APPEALED_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>Siparişinize itiraz ettiniz. Sorunu çözmek için lütfen destek ile iletişime geçin.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_VENDOR_CONFIRMED_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>İşlemi onayladınız ve fonları serbest bıraktınız.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_VENDOR_CANCELLED_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>Siparişinizi iptal ettiniz. İşlem kapatıldı.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"P2P_VENDOR_APPEALED_ORDER": {
+			"html": "<div><p> Sevgili ${name} </p><p>Siparişinize itiraz ettiniz. Sorunu çözmek için lütfen destek ile iletişime geçin.<br /></p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Siparişinize Git</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>İstek şu IP den yapıldı: ${ip}</p><p>Saygılarımızla<br> ${api_name} ekibi </p></div>",
+			"title": "P2P Siparişinizde Aktivite Tespit Edildi"
+		},
+		"AUTO_TRADE_ERROR": {
+			"html": "<div><p>Sayın ${name},</p><p>Otomatik ticaret yapılandırmanız, aşağıdaki işlem için yetersiz bakiye nedeniyle başarısız oldu. Lütfen bakiyenizi kontrol edin ve güncelleyin. Harcama Tutarı: ${spend_amount}, Harcanan Coin: ${spend_coin}, Satın Alınan Coin: ${buy_coin}.</p><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>Saygılarımızla, ${api_name} ekibi</p></div>",
+			"title": "Otomatik Ticaret Yapılandırmanızda Hata"
+		},
+		"AUTO_TRADE_REMINDER": {
+			"html": "<div><p>Sayın ${name},</p><p>Bu, <b>${spend_amount} ${spend_coin} karşılığında ${buy_coin}</b> olan tekrarlanan işleminizin 12 saat içinde aktive olacağına dair bir hatırlatmadır. Başarılı bir işlem için cüzdanınızda yeterli bakiye olduğundan emin olun:</p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">CÜZDANIMI GÖRÜNTÜLE</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>Saygılarla,<br />${api_name} ekibi</p></div>",
+			"title": "Tekrarlanan Siparişiniz Yakında Aktiviteye Geçiyor"
+		},
+		"AUTO_TRADE_FILLED": {
+			"html": "<div><p>Sayın ${name},</p><p>Otomatik siparişiniz olan <b>${spend_amount} ${spend_coin} karşılığında ${buy_coin}</b> başarıyla işlendi.</p><div>İşlem geçmişinizi aşağıda inceleyebilirsiniz:</div><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">TİCARET GEÇMİŞİNİ GÖRÜNTÜLE</Button></a></div><p>Platformumuzu kullandığınız için teşekkür ederiz.</p><p>Saygılarımla,<br />${api_name} ekibi</p></div>",
+			"title": "Otomatik siparişiniz başarıyla işlendi"
+		},
+		"SUSPICIOUS_LOGIN": {
+			"html": "<div><p>Sayın ${name},</p><p>Hesabınıza yeni bir cihaz veya konumdan giriş denemesi tespit ettik. Eğer bu sizseniz, lütfen girişi onaylayarak hesabınızı güvence altına alın. Değilse, hesabınızı korumak için derhal harekete geçin.</p><p><strong>Giriş Detayları:</strong><br />IP Adresi: ${ip}<br />Konum: ${location}<br />Cihaz: ${device}<br />Zaman: ${time}</p><p>Devam etmek için aşağıdaki seçeneklerden birini seçin:</p><div style=\"padding-top: 10px; margin-bottom: 10px;\"><a href=\"${confirmation_link}\" target=\"_blank\"><Button style=\"cursor: pointer; background-color: #333333; color: white; border: none; padding: 1rem; text-transform: uppercase; cursor: pointer !important; font-size: 14px; min-width: 11rem;\">Girişi Onayla</Button></a></div><p>Eğer bu giriş denemesi sizin tarafınızdan yapılmadıysa, yetkisiz erişimi önlemek için <a href=\"${freeze_account_link}\" style=\"color: #FF0000; text-decoration: underline;\">hesabınızı dondurmanızı</a> öneririz.</p><p>Saygılarımızla,<br />${api_name} Ekibi</p></div>",
+			"title": "Şüpheli Giriş Uyarısı"
+		},
+		"SUSPICIOUS_LOGIN_CODE": {
+			"title": "Şüpheli Giriş Uyarısı",
+			"html": "<div><p>Merhaba ${name},</p><p>Hesabınıza yeni bir cihaz veya konumdan giriş yapılmaya çalışıldığını fark ettik. Eğer bu sizseniz, lütfen aşağıdaki kodu kullanarak girişi onaylayın. Aksi takdirde, hesabınızı korumak için hemen önlem alın.</p><p><strong>Giriş Detayları:</strong><br />IP Adresi: ${ip}<br />Konum: ${location}<br />Cihaz: ${device}<br />Zaman: ${time}</p><div style=\"margin: 20px 0; padding: 10px; border: 1px dashed #333333; text-align: center; border-radius: 6px;\"><span style=\"font-size: 20px; letter-spacing: 2px; font-weight: bold; color: #333333;\">${confirmation_code}</span></div><p><strong>Eğer bu siz değilseniz</strong>, <a href=\"${freeze_account_link}\">hesabınızı hemen dondurmanızı</a> öneririz.</p><p>Saygılarımızla,<br />${api_name} Ekibi</p></div>"
+		},
+		"WITHDRAWAL_REQUEST_CODE": {
+			"html": "<div><p>Sayın ${name}</p><p>${address} adresine ${amount} ${currency} çekim talebinde bulundunuz.<br /><br />Tutar: ${amount} ${currency}<br />Ücret: ${fee} ${fee_coin}<br />Adres: ${address}<br /><span id=\"network\">Ağ: ${network}</span><br /><br />Bu çekimi onaylamak için lütfen aşağıdaki doğrulama kodunu kullanın.</p><div style=\"padding:1rem;background-color:#f5f5f5;border:1px dashed #999;font-family:monospace;font-size:1.5rem;letter-spacing:4px;text-align:center;margin-bottom:20px;\">${confirmation_code}</div><p>Bu kod sınırlı süre için geçerlidir ve devam etmek için girilmelidir.</p><p>Eğer bu talebi siz yapmadıysanız, lütfen <a href=\"${freeze_account_link}\">hesabınızı dondurun</a> ve derhal bildirin.</p><p>Talebin başlatıldığı cihaz/IP: ${ip}</p><p>Saygılarımızla<br />${api_name} ekibi</p></div>",
+			"title": "${currency} Çekim Talebi"
+		},
+		"RESET_PASSWORD_CODE": {
+			"html": "<div><p>Sayın ${name}</p><p>Hesabınızın parolasını sıfırlama talebinde bulundunuz.<br />Devam etmek için lütfen aşağıdaki doğrulama kodunu kullanın.</p><div style=\"padding:1rem;background-color:#f5f5f5;border:1px dashed #999;font-family:monospace;font-size:1.5rem;letter-spacing:4px;text-align:center;margin-bottom:20px;\">${confirmation_code}</div><p>Devam etmek için bu kodu parola sıfırlama sayfasına girin. Kodun geçerlilik süresi sınırlıdır.</p><p>Eğer bu talep size ait değilse, lütfen <a href=\"${freeze_account_link}\">hesabınızı dondurun</a> ve derhal bildirin.</p><p><strong>Not:</strong> Güvenlik amacıyla, şifre sıfırlamasından sonra 24 saat boyunca çekimler kısıtlanır.</p><p>Talebin başlatıldığı cihaz/IP: ${ip}</p><p>Saygılarımızla<br />${api_name} ekibi</p></div>",
+			"title": "Parola Sıfırlama Talebi"
+		},
+		"SIGNUP_CODE": {
+			"html": "<div><p>Sayın ${name}</p><p>Kayıt işleminizi tamamlamak için lütfen aşağıdaki kodu kullanarak e-posta adresinizi doğrulayın.</p><div style=\"padding:1rem;background-color:#f5f5f5;border:1px dashed #999;font-family:monospace;font-size:1.5rem;letter-spacing:4px;text-align:center;margin-bottom:20px;\">${confirmation_code}</div><p>Kayıt sayfasında bu kodu girerek kayıt işlemini tamamlayın. Kod sınırlı süre için geçerlidir.</p><p>Herhangi bir sorunuz varsa, bu e-postayı yanıtlayarak bize ulaşabilirsiniz.</p><p>Saygılarımızla<br />${api_name} ekibi</p></div>",
+			"title": "Kayıt – Doğrulama Kodu"
+		}
+	}
+}

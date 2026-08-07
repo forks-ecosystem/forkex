@@ -1,0 +1,15 @@
+
+Монитор работает:
+
+    Следит за нодой LBTC каждые 30 секунд
+    Парсит raw hex блоков для извлечения txid (нода не возвращает массив tx)
+    Ищет транзакции к адресу LRjqhn8LYZS7bHoBbyeBnHvHojA9o3ackH
+    Ждёт 3 подтверждения перед зачислением
+    Дубли пропускаются (проверка tx_hash в transactions)
+    Синхронизирует balances → user_wallets → transactions
+
+Управление:
+
+systemctl status lbtc-deposit-monitor — статус
+journalctl -u lbtc-deposit-monitor -f — логи в реальном времени
+systemctl restart lbtc-deposit-monitor — перезапуск

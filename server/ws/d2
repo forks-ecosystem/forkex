@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  forkex-ws:
+    container_name: forkex-ws
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    environment:
+      - WS_VERBOSE=1
+    entrypoint:
+      - node
+    ports:
+      - 10080:10080
+    networks:
+      - forkex-network
+
+networks:
+  forkex-network:
+    external: true

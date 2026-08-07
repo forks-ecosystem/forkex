@@ -1,0 +1,59 @@
+{
+    "binance_poll_interval": "5s",
+    "fork_poll_interval": "7s",
+    "db_dsn": "postgres://admin:root@forkex-db:5432/hollaex?sslmode=disable",
+    "anchors": [
+        "btc-usdt",
+        "eth-usdt",
+        "xrp-usdt"
+    ],
+    "forks": [
+        {
+            "symbol": "trx-usdt",
+            "anchor": "btc-usdt",
+            "multiplier": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "xht-usdt",
+            "anchor": "btc-usdt",
+            "multiplier": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "kas-usdt",
+            "source": "kucoin",
+            "kucoin_symbol": "KAS-USDT"
+        },
+        {
+            "symbol": "gor-usdt",
+            "anchor": "btc-usdt",
+            "target_price": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "brics-usdt",
+            "anchor": "btc-usdt",
+            "target_price": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "btm-usdt",
+            "anchor": "btc-usdt",
+            "target_price": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "cas-usdt",
+            "anchor": "btc-usdt",
+            "target_price": 0.08,
+            "volatility": 0.003
+        },
+        {
+            "symbol": "kasv2-usdt",
+            "anchor": "btc-usdt",
+            "target_price": 0.08,
+            "volatility": 0.003
+        }
+    ]
+}

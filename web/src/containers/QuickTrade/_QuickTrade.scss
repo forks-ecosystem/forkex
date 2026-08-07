@@ -1,0 +1,215 @@
+@import './components/Details';
+
+.quote-container {
+	background-color: $quick-trade-background;
+	overflow-y: scroll;
+}
+
+.base_negative_balance,
+.success-review {
+	margin: 1rem 0;
+	width: 30rem;
+}
+.quote-review-wrapper {
+	margin: 1rem 0;
+	width: 40rem !important;
+	position: relative;
+	.quote_header {
+		font-size: 22px;
+		font-weight: bold;
+	}
+	.quote_content {
+		color: $colors-deactivate;
+	}
+	.disabled-area {
+		opacity: 0.3;
+	}
+
+	.quote_expiry_content {
+		margin-top: 1rem;
+
+		p {
+			margin: 0;
+		}
+
+		.clock-icon {
+			margin-right: 0.75rem;
+		}
+
+		&.expired-content {
+			* {
+				color: #fe9d00;
+			}
+		}
+	}
+
+	.expiry-progress {
+		display: flex;
+		.ant-progress.ant-progress-line.ant-progress-status-normal.ant-progress-small,
+		.ant-progress-outer {
+			display: flex;
+			border-radius: 0;
+		}
+
+		.ant-progress-inner {
+			background-color: transparent;
+			border-radius: 0;
+		}
+
+		.ant-progress-bg {
+			border-radius: 0;
+		}
+	}
+
+	.expired-block {
+		opacity: 0.25;
+	}
+	.slippage-warning-content {
+		background-color: $colors-notification-pending;
+		padding: 2% 4%;
+		margin-top: 3%;
+		display: flex;
+		gap: 2%;
+		align-items: center;
+		color: #ffffff;
+		.slippage-warning-icon {
+			svg {
+				width: 1.5rem;
+				height: 1.5rem;
+			}
+		}
+	}
+}
+
+.quote-countdown-wrapper {
+	display: flex;
+	justify-content: center;
+	flex-direction: column;
+	align-items: center;
+
+	.counter {
+		font-size: $font-size-subhead1;
+	}
+}
+
+.quote-success-review-text {
+	margin: 1rem 0 2rem;
+	font-size: $font-size-main;
+	text-align: center;
+}
+
+.quote-success__title {
+	text-transform: uppercase;
+	font-family: Raleway;
+	font-weight: bold;
+	font-size: 24px;
+	text-align: center;
+}
+.quick-trade__icon {
+	height: 7rem;
+	width: 7rem;
+	margin-bottom: 2rem;
+	margin-right: auto;
+	margin-left: auto;
+}
+
+.layout-mobile {
+	.quote-container {
+		background-color: transparent;
+		overflow-y: scroll;
+		min-height: $max-content-height-double-bar-mobile;
+		max-height: $max-content-height-double-bar-mobile;
+		.quick_trade-wrapper {
+			flex: 1 1;
+			flex-direction: column;
+			padding: 0;
+			height: fit-content;
+		}
+	}
+	.base_negative_balance,
+	.success-review,
+	.quote-review-wrapper {
+		margin: auto;
+	}
+}
+
+.risky-trade-disclaimer {
+	.disclaimer-title {
+		font-size: xx-large;
+		text-align: center;
+		margin: 2rem auto;
+	}
+
+	.disclaimer-msg {
+		font-size: small;
+		margin: 2dvh auto;
+	}
+
+	.extreme-volatility-msg {
+		color: #ffaa00;
+	}
+
+	.disclaimer-checkbox span {
+		color: $colors-main-black;
+		opacity: 0.7;
+	}
+
+	.disclaimer-checkbox.disclaimer-checkbox-selected span {
+		opacity: 1;
+	}
+
+	.coin-icon-container {
+		text-align: center;
+	}
+}
+
+.cancel-order-dialog-wrapper,
+.cancel-all-orders-dialog-wrapper,
+.view-more-order-dialog-wrapper {
+	.ReactModal__Content {
+		width: 32rem;
+		padding: 2.5rem !important;
+	}
+
+	.cancel-order-dialog-content,
+	.cancel-all-orders-dialog-content,
+	.view-more-order-dialog-content {
+		.view-more-order-dialog-header {
+			border-bottom: 1px solid $colors-border;
+			padding-bottom: 1.5rem;
+		}
+		.cancel-order-icon {
+			width: 1.5rem;
+			height: 1.5rem;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+
+			svg {
+				width: 1.5rem;
+				height: 1.5rem;
+				fill: $colors-main-black;
+			}
+		}
+
+		.order-details-title {
+			font-size: 1.6rem;
+		}
+		.order-details-title-icon {
+			font-size: 2rem;
+		}
+
+		.order-details-section {
+			margin-bottom: 1.5rem;
+
+			.border-bottom {
+				border-bottom: 1px solid $colors-border;
+			}
+
+			.secondary-text {
+				color: $colors-deactivate;
+				font-size: 1rem;
+			}
+		}
+	}
+}

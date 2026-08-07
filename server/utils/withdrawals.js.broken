@@ -1,0 +1,128 @@
+'use strict';
+
+const { Withdrawal, Coin, User } = require('../db/models');
+const { Op } = require('sequelize');
+
+const getWithdrawalsUtils = async (params) => {
+  const { user_id, limit = 50, page = 1, start_date, end_date } = params.query;
+
+  if (!user_id) {
+    throw new Error('user_id is required');
+  }
+
+  try {
+    const whereConditions = { user_id };
+
+    if (start_date || end_date) {
+      whereConditions.created_at = {};
+      if (start_date) whereConditions.created_at[Op.gte] = new Date(start_date);
+      if (end_date) whereConditions.created_at[Op.lte] = new Date(end_date);
+    }
+
+    const withdrawals = await Withdrawal.findAll({
+      where: whereConditions,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      include: [{ model: Coin, as: 'coin', attributes: ['symbol'] }]
+    });
+
+    const formatted = withdrawals.map(w => ({
+      id: w.id,
+      user_id: w.user_id,
+      coin_id: w.coin_id,
+      amount: parseFloat(w.amount),
+      status: w.status === 'completed',
+      created_at: w.created_at,
+      updated_at: w.updated_at,
+      currency: w.coin?.symbol || '-',
+      network_id: w.network_id || 1
+    }));
+
+    return { data: formatted };
+  } catch (error) {
+    console.error('Error fetching withdrawals:', error);
+    throw new Error('Failed to fetch withdrawals');
+  }
+};
+
+const getAdminWithdrawalsUtils = async (params) => {
+  const {
+    limit = 50,
+    page = 1,
+    user_id,
+    currency,
+    status,
+    start_date,
+    end_date,
+    order_by = 'created_at',
+    order = 'desc'
+  } = params.query;
+
+  try {
+    const whereConditions = {};
+
+    if (user_id) whereConditions.user_id = user_id;
+
+    if (currency) {
+      const coin = await Coin.findOne({ where: { symbol: currency.toUpperCase() } });
+      if (coin) whereConditions.coin_id = coin.id;
+    }
+
+    if (status) whereConditions.status = status;
+
+    if (start_date || end_date) {
+      whereConditions.created_at = {};
+      if (start_date) whereConditions.created_at[Op.gte] = new Date(start_date);
+      if (end_date) whereConditions.created_at[Op.lte] = new Date(end_date);
+    }
+
+    const total = await Withdrawal.count({ where: whereConditions });
+
+    const withdrawals = await Withdrawal.findAll({
+      where: whereConditions,
+      order: [[order_by, order.toUpperCase()]],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      include: [
+        { model: Coin, as: 'coin', attributes: ['symbol', 'name'] },
+        { model: User, as: 'user', attributes: ['id', 'email', 'full_name'] }
+      ]
+    });
+
+    const formatted = withdrawals.map(w => ({
+      id: w.id,
+      user_id: w.user_id,
+      user_email: w.user?.email || '',
+      user_name: w.user?.full_name || '',
+      coin_symbol: w.coin?.symbol || '',
+      amount: parseFloat(w.amount),
+      fee: w.fee ? parseFloat(w.fee) : 0,
+      status: w.status,
+      tx_hash: w.tx_hash || '',
+      address: w.address || '',
+      network: w.network || '',
+      created_at: w.created_at,
+      updated_at: w.updated_at
+    }));
+
+    return {
+      data: formatted,
+      count: total,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    };
+  } catch (error) {
+    console.error('Error fetching admin withdrawals:', error);
+    throw new Error('Failed to fetch admin withdrawals');
+  }
+};
+
+module.exports = {
+  getWithdrawalsUtils,
+  getAdminWithdrawalsUtils
+};

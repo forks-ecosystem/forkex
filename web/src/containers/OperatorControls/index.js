@@ -1,0 +1,1684 @@
+import React, { Component, Fragment } from 'react';
+import { connect } from 'react-redux';
+import { Link, withRouter } from 'react-router';
+import { bindActionCreators } from 'redux';
+import isEqual from 'lodash.isequal';
+import debounce from 'lodash.debounce';
+import classnames from 'classnames';
+import merge from 'lodash.merge';
+import { EditFilled } from '@ant-design/icons';
+import {
+	getStringByKey,
+	getAllStrings,
+	EDITABLE_NAME_SEPARATOR,
+	generateInputName,
+} from 'utils/string';
+import Modal from 'components/Dialog/DesktopDialog';
+import { Input, Button, Divider, Tabs, message } from 'antd';
+import { SettingFilled, KeyOutlined } from '@ant-design/icons';
+import { initializeStrings, getValidLanguages } from 'utils/initialize';
+import { publish, updateInjectedHTML } from 'actions/operatorActions';
+import LANGUAGES from 'config/languages';
+import { content as CONTENT } from 'config/localizedStrings';
+import AllStringsModal from './components/AllStringsModal';
+import StringSettingsModal from './components/StringSettings';
+import AddLanguageModal from './components/AddLanguageModal';
+import ThemeSettings from './components/ThemeSettings';
+import AddTheme from './components/AddTheme';
+import AllIconsModal from './components/AllIconsModal';
+import UploadIcon from './components/UploadIcon';
+import SectionsModal from './components/Sections';
+import AddSection from './components/AddSection';
+import ConfigsModal from './components/ConfigsModal';
+import WalletConfigsModal from './components/WalletConfigsModal';
+import DigitalAssetsConfigsModal from './components/DigitalAssetsConfigsModal';
+import String from './components/String';
+import withConfig from 'components/ConfigProvider/withConfig';
+import {
+	setLanguage,
+	setAdminSortData,
+	setAdminWalletSortData,
+	setAdminDigitalAssetsSortData,
+	setEditMode,
+	setIsDisplayConsoleHead,
+	setIsDisplayConsoleBody,
+	setIsGraphicsEditMode,
+	setIsThemesEditMode,
+	setIsStringsEditMode,
+} from 'actions/appActions';
+import {
+	pushTempContent,
+	getTempLanguageKey,
+	filterOverwrites,
+	countPlaceholders,
+} from 'utils/string';
+import { filterThemes } from 'utils/color';
+import { getIconByKey, getAllIconsArray } from 'utils/icon';
+import withEdit from 'components/EditProvider/withEdit';
+import { DASH_TOKEN_KEY } from 'config/constants';
+import { getDashToken } from 'containers/Admin/AdminFinancials/action';
+import { setDashToken } from 'actions/assetActions';
+import { checkRole } from 'utils/token';
+
+const { TabPane } = Tabs;
+const { TextArea } = Input;
+const TAB_KEYS = ['head', 'body'];
+
+class OperatorControls extends Component {
+	constructor(props) {
+		super(props);
+
+		const { themeOptions, injected_html = { head: '', body: '' } } = this.props;
+
+		const strings = localStorage.getItem('strings') || '{}';
+		const icons = localStorage.getItem('icons') || '{}';
+		const color = localStorage.getItem('color') || '{}';
+		const overwrites = JSON.parse(strings);
+		const iconsOverwrites = JSON.parse(icons);
+		const colorOverwrites = JSON.parse(color);
+		const languageKeys = getValidLanguages();
+		const languageOptions = LANGUAGES.filter(({ value }) =>
+			languageKeys.includes(value)
+		);
+		const selectedLanguages = this.getSelectedLanguages(languageKeys);
+		const selectedThemes = this.getSelectedThemes(themeOptions);
+
+		this.state = {
+			isPublishEnabled: false,
+			isSaveEnabled: false,
+			isEditModalOpen: false,
+			editType: null,
+			isAllStringsModalOpen: false,
+			editableElementIds: [],
+			languageKeys,
+			languageOptions,
+			selectedLanguages,
+			overwrites,
+			allStrings: [],
+			searchValue: '',
+			searchResults: [],
+			iconSearchResults: [],
+			iconSearchValue: '',
+			source: false,
+			isStringsSettingsOpen: false,
+			isAddLanguageModalOpen: false,
+			isExitConfirmationOpen: false,
+			isExitConsoleConfirmationOpen: false,
+			isPublishConfirmationOpen: false,
+			isUploadIconOpen: false,
+			isThemeSettingsOpen: false,
+			isAddThemeOpen: false,
+			isSectionsModalOpen: false,
+			isAddSectionOpen: false,
+			isConfigsModalOpen: false,
+			isWalletConfigModalOpen: false,
+			isDigitalAssetsConfigsModalOpen: false,
+			selectedTheme: '',
+			iconsOverwrites,
+			colorOverwrites,
+			editableIconIds: [],
+			isAllIconsModalOpen: false,
+			selectedThemes,
+			allIconsArray: [],
+			injected_html: { head: '', body: '', ...injected_html },
+			isUpload: false,
+			isRemove: false,
+			removedKeys: [],
+			activeTab: 'head',
+			isDisplayWarinigPopup: false,
+			isOperatorControls: false,
+		};
+	}
+
+	languageChange = null;
+
+	handleKeyDown = (event) => {
+		const { isInjectMode, isEditMode } = this.props;
+		if (event.key === 'Escape') {
+			if (isInjectMode) {
+				this.toggleInjectMode();
+			} else if (isEditMode) {
+				this.toggleEditMode();
+			}
+		}
+	};
+
+	handleDelayNavigate = debounce(() => {
+		this.props.router.push('/admin');
+	}, 100);
+
+	componentDidMount() {
+		const {
+			initialData: {
+				query: { stringSettings = false, themeSettings = false } = {},
+			} = {},
+			isOperatorEdit,
+			isDisplayConsoleHead,
+			isDisplayConsoleBody,
+			isThemesEditMode,
+			isStringsEditMode,
+			isGraphicsEditMode,
+		} = this.props;
+		if (isOperatorEdit) {
+			this.toggleEditMode();
+		}
+
+		this.setupAdminListeners();
+
+		if (stringSettings) {
+			this.toggleEditMode();
+			this.openStringSettingsModal();
+		} else if (themeSettings || isThemesEditMode) {
+			this.toggleEditMode();
+			this.openThemeSettings();
+		} else if (isGraphicsEditMode) {
+			this.toggleEditMode();
+			this.openAllIconsModal();
+		} else if (isStringsEditMode) {
+			this.toggleEditMode();
+			this.openAllStringsModal();
+		}
+		const role = checkRole();
+		if (role === 'admin') {
+			const DASH_TOKEN = localStorage.getItem(DASH_TOKEN_KEY);
+			if (!DASH_TOKEN) {
+				this.getDashToken();
+			}
+		}
+		document.addEventListener('keydown', this.handleKeyDown);
+
+		if (isDisplayConsoleHead || isDisplayConsoleBody) {
+			this.setState({ activeTab: isDisplayConsoleHead ? 'head' : 'body' });
+			this.toggleInjectMode();
+		}
+	}
+
+	componentWillUnmount() {
+		this.doSearch.cancel();
+		this.doIconSearch.cancel();
+		document.removeEventListener('keydown', this.handleKeyDown);
+		this.removeAdminListeners();
+		clearTimeout(this.languageChange);
+		this.props.setIsDisplayConsoleHead(false);
+		if (this.handleDelayNavigate) {
+			this.handleDelayNavigate.cancel();
+		}
+	}
+
+	UNSAFE_componentWillUpdate(_, nextState) {
+		const { languageKeys } = this.state;
+		if (
+			JSON.stringify(languageKeys) !== JSON.stringify(nextState.languageKeys)
+		) {
+			const languageOptions = LANGUAGES.filter(({ value }) =>
+				nextState.languageKeys.includes(value)
+			);
+			const selectedLanguages = this.getSelectedLanguages(
+				nextState.languageKeys
+			);
+			this.setState({
+				languageOptions,
+				selectedLanguages,
+			});
+		}
+	}
+
+	getDashToken = async () => {
+		const res = await getDashToken();
+		if (res && res.token) {
+			this.props.setDashToken(res.token);
+			localStorage.setItem(DASH_TOKEN_KEY, res.token);
+		}
+	};
+
+	getSelectedLanguages = (languageKeys) => {
+		const isENAvailable = !!languageKeys.find((lang) => lang === 'en');
+		const languageCount = languageKeys.length;
+		const hasMultipleLanguages = languageCount > 1;
+		let selectedLanguages = [];
+
+		if (isENAvailable && hasMultipleLanguages) {
+			selectedLanguages[0] = 'en';
+			selectedLanguages[1] = languageKeys.filter((lang) => lang !== 'en')[
+				languageCount - 2
+			];
+		} else if (hasMultipleLanguages) {
+			selectedLanguages[0] = languageKeys[0];
+			selectedLanguages[1] = languageKeys[languageCount - 1];
+		} else {
+			selectedLanguages = new Array(2).fill(languageKeys[0]);
+		}
+
+		return selectedLanguages;
+	};
+
+	getSelectedThemes = (themeOptions) => {
+		const themeKeys = themeOptions.map(({ value }) => value);
+		const isDarkAvailable = !!themeKeys.find((theme) => theme === 'dark');
+		const themeCount = themeKeys.length;
+		const hasMultipleThemes = themeCount > 1;
+		let selectedThemes = [];
+
+		if (isDarkAvailable && hasMultipleThemes) {
+			selectedThemes[0] = 'dark';
+			selectedThemes[1] = themeKeys.filter((theme) => theme !== 'dark')[
+				themeCount - 2
+			];
+		} else if (hasMultipleThemes) {
+			selectedThemes[0] = themeKeys[0];
+			selectedThemes[1] = themeKeys[themeCount - 1];
+		} else {
+			selectedThemes = new Array(2).fill(themeKeys[0]);
+		}
+
+		return selectedThemes;
+	};
+
+	setupAdminListeners = () => {
+		const hasEditPermission = this.getEditPermission();
+		if (hasEditPermission) {
+			window.addEventListener('click', this.handleEditButton);
+		}
+	};
+
+	removeAdminListeners = () => {
+		const hasEditPermission = this.getEditPermission();
+		if (hasEditPermission) {
+			window.removeEventListener('click', this.handleEditButton);
+		}
+	};
+
+	getEditPermission = () => {
+		return true;
+	};
+
+	handleEditButton = ({ target: { dataset = {} } }, source) => {
+		const { isEditModalOpen, isUploadIconOpen } = this.state;
+		const { isEditMode } = this.props;
+		const { stringId, iconId, sectionId, configId } = dataset;
+
+		if (isEditMode && !isEditModalOpen && !isUploadIconOpen) {
+			const string_ids_array = stringId ? stringId.split(',') : [];
+			const icon_ids_array = iconId ? iconId.split(',') : [];
+
+			this.setState(
+				{
+					editableElementIds: string_ids_array,
+					editableIconIds: icon_ids_array,
+				},
+				() => {
+					if (stringId) {
+						if (source) {
+							this.closeAllStringsModal();
+							this.openEditModal(source);
+						} else {
+							this.openEditModal();
+						}
+					} else if (iconId) {
+						this.openUploadIcon();
+					} else if (sectionId) {
+						this.openSectionsModal();
+					} else if (configId === 'MARKET_LIST_CONFIGS') {
+						this.openConfigsModal();
+					} else if (configId === 'WALLET_LIST_CONFIGS') {
+						this.openWalletConfigsModal();
+					} else if (configId === 'DIGITAL_ASSETS_LIST_CONFIGS') {
+						this.openDigitalAssetsConfigsModal();
+					}
+				}
+			);
+		}
+	};
+
+	openEditModal = (source = false) => {
+		const { editableElementIds, languageKeys } = this.state;
+		const editData = {};
+
+		if (editableElementIds.length > 0) {
+			languageKeys.forEach((lang) => {
+				editData[lang] = {};
+				editableElementIds.forEach((key) => {
+					editData[lang][key] = getStringByKey(key, lang);
+				});
+			});
+
+			this.setState({
+				source,
+				editData,
+				isEditModalOpen: true,
+			});
+		}
+	};
+
+	closeEditModal = () => {
+		const { source } = this.state;
+		this.setState(
+			{
+				editableElementIds: [],
+				editData: {},
+				isEditModalOpen: false,
+				isSaveEnabled: false,
+			},
+			() => {
+				if (source) {
+					this.openAllStringsModal();
+				}
+			}
+		);
+	};
+
+	handleInputChange = ({ target: { value, name } }) => {
+		const [key, lang] = name.split(EDITABLE_NAME_SEPARATOR);
+		this.updateEditData(value, key, lang);
+	};
+
+	handleAddLink = (value, name) => {
+		const [key, lang] = name.split(EDITABLE_NAME_SEPARATOR);
+		this.updateEditData(
+			value + ' <a href="https://example.com">link</a>',
+			key,
+			lang
+		);
+	};
+
+	updateEditData = (value, key, lang) => {
+		const { editData } = this.state;
+		this.setState((prevState) => ({
+			...prevState,
+			isSaveEnabled: true,
+			editData: {
+				...prevState.editData,
+				[lang]: {
+					...editData[lang],
+					[key]: value,
+				},
+			},
+		}));
+	};
+
+	handleSave = () => {
+		const { editData, overwrites, languageKeys, source } = this.state;
+		const processedData = { ...editData };
+
+		const saveData = {};
+		languageKeys.forEach((lang) => {
+			saveData[lang] = {
+				...overwrites[lang],
+				...processedData[lang],
+			};
+		});
+
+		languageKeys.forEach((lang) => {
+			Object.entries(saveData[lang]).forEach(([key, string]) => {
+				const isEnglish = lang === 'en';
+				const hasInvalidPlaceholders =
+					string && !this.validateString(string, key);
+				const hasDeletedEnglish = !string && isEnglish;
+				if (hasInvalidPlaceholders || hasDeletedEnglish) {
+					delete saveData[lang][key];
+				}
+			});
+		});
+
+		this.setState(
+			{
+				overwrites: saveData,
+				isEditModalOpen: false,
+				isSaveEnabled: false,
+				editData: {},
+				editableElementIds: [],
+			},
+			() => {
+				initializeStrings(saveData);
+				this.forceRender();
+				this.enablePublish();
+				if (source) {
+					this.openAllStringsModal();
+				}
+			}
+		);
+	};
+
+	validateString = (string, key) => {
+		const benchmarkLanguage = 'en';
+		const benchmarkPlaceholders = countPlaceholders(
+			getStringByKey(key, benchmarkLanguage, CONTENT)
+		);
+		const placeholders = countPlaceholders(string);
+
+		return placeholders === benchmarkPlaceholders;
+	};
+
+	handlePublish = () => {
+		const { isEditMode, isInjectMode } = this.props;
+
+		if (isEditMode) {
+			const {
+				overwrites,
+				iconsOverwrites: icons,
+				colorOverwrites,
+				languageKeys,
+			} = this.state;
+
+			const {
+				defaults,
+				sections,
+				pinned_markets,
+				default_sort,
+				pinned_assets,
+				default_wallet_sort,
+				default_digital_assets_sort,
+			} = this.props;
+
+			const valid_languages = languageKeys.join();
+			const strings = filterOverwrites(overwrites);
+			const color = filterThemes(colorOverwrites);
+
+			const configs = {
+				defaults,
+				color,
+				strings,
+				icons,
+				valid_languages,
+				sections,
+				pinned_markets,
+				default_sort,
+				pinned_assets,
+				default_wallet_sort,
+				default_digital_assets_sort,
+			};
+
+			publish(configs)
+				.then(this.reload)
+				.catch((err) => {
+					const error = err && err.data ? err.data.message : err.message;
+					message.error(error);
+				});
+		} else if (isInjectMode) {
+			const { injected_html } = this.state;
+			updateInjectedHTML(injected_html)
+				.then(this.reload)
+				.catch((err) => {
+					const error = err && err.data ? err.data.message : err.message;
+					message.error(error);
+				});
+		}
+		localStorage.removeItem('removedBackgroundItems');
+	};
+
+	reload = () => window.location.reload(false);
+
+	enablePublish = (isPublishEnabled = true) => {
+		this.setState({
+			isPublishEnabled,
+		});
+	};
+
+	toggleEditMode = () => {
+		const {
+			handleEditMode,
+			isEditMode,
+			isInjectMode,
+			isGraphicsEditMode,
+			isThemesEditMode,
+			isStringsEditMode,
+			setIsGraphicsEditMode,
+			setIsThemesEditMode,
+			setIsStringsEditMode,
+		} = this.props;
+		if (!isInjectMode) {
+			if (!isEditMode) {
+				handleEditMode();
+			} else {
+				this.openExitConfirmationModal();
+			}
+			isGraphicsEditMode && setIsGraphicsEditMode(false);
+			isThemesEditMode && setIsThemesEditMode(false);
+			isStringsEditMode && setIsStringsEditMode(false);
+		} else {
+			this.setState({ isDisplayWarinigPopup: true });
+		}
+	};
+
+	toggleInjectMode = () => {
+		const {
+			handleInjectMode,
+			isEditMode,
+			isInjectMode,
+			isDisplayConsoleHead,
+			isDisplayConsoleBody,
+			setIsDisplayConsoleHead,
+			setIsDisplayConsoleBody,
+		} = this.props;
+		const { injected_html } = this.state;
+		if (!isEditMode) {
+			if (!isInjectMode || isEqual(injected_html, this.props.injected_html)) {
+				handleInjectMode();
+			} else {
+				this.openExitConsoleConfirmationModal();
+			}
+			isDisplayConsoleHead && setIsDisplayConsoleHead(false);
+			isDisplayConsoleBody && setIsDisplayConsoleBody(false);
+		} else {
+			this.setState({ isDisplayWarinigPopup: true });
+		}
+	};
+
+	exitEditMode = () => {
+		const { isPublishEnabled } = this.state;
+		const { handleEditMode, setEditMode = () => {} } = this.props;
+		handleEditMode();
+		this.closeExitConfirmationModal();
+		setEditMode(false);
+
+		if (isPublishEnabled) {
+			this.reload();
+		}
+	};
+
+	exitInjectMode = () => {
+		const { handleInjectMode, injected_html } = this.props;
+		this.setState({ injected_html }, () => {
+			handleInjectMode();
+			this.closeExitConsoleConfirmationModal();
+		});
+	};
+
+	getLanguageLabel = (key) => {
+		const { label } = LANGUAGES.find(({ value }) => value === key);
+		return label;
+	};
+
+	getDefaultString = (key, lang) => {
+		const defaultString = getStringByKey(key, lang, CONTENT);
+		this.updateEditData(defaultString, key, lang);
+	};
+
+	openAllStringsModal = () => {
+		const { languageKeys } = this.state;
+		const allStrings = getAllStrings(languageKeys);
+
+		this.setState(
+			{
+				allStrings,
+				isAllStringsModalOpen: true,
+			},
+			this._doSearch
+		);
+	};
+
+	openAllIconsModal = () => {
+		const { themeOptions, allIcons } = this.props;
+		const themeKeys = themeOptions.map(({ value }) => value);
+		const allIconsArray = getAllIconsArray(themeKeys, allIcons);
+
+		this.setState(
+			{
+				allIconsArray,
+				isAllIconsModalOpen: true,
+			},
+			this._doIconSearch
+		);
+	};
+
+	closeAllIconsModal = () => {
+		this.setState({
+			isAllIconsModalOpen: false,
+		});
+	};
+
+	closeAllStringsModal = () => {
+		this.setState({
+			isAllStringsModalOpen: false,
+		});
+	};
+
+	openStringSettingsModal = () => {
+		this.closeAllStringsModal();
+		this.setState({
+			isStringsSettingsOpen: true,
+		});
+	};
+
+	closeStringSettingsModal = (source) => {
+		this.setState(
+			{
+				isStringsSettingsOpen: false,
+			},
+			() => {
+				if (source) {
+					this.openAllStringsModal();
+				}
+			}
+		);
+	};
+
+	openAddLanguageModal = () => {
+		this.closeStringSettingsModal();
+		this.setState({
+			isAddLanguageModalOpen: true,
+		});
+	};
+
+	closeAddLanguageModal = () => {
+		this.setState(
+			{
+				isAddLanguageModalOpen: false,
+			},
+			() => {
+				this.openStringSettingsModal();
+			}
+		);
+	};
+
+	doSearch = debounce(() => this._doSearch(), 300);
+
+	_doSearch = () => {
+		const { searchValue, allStrings, selectedLanguages } = this.state;
+		const [l1, l2] = selectedLanguages;
+		const searchTerm = searchValue.toLowerCase().trim();
+		const searchResults = [];
+		allStrings.forEach((stringObject) => {
+			if (
+				stringObject[l1] &&
+				stringObject[l1].toLowerCase().includes(searchTerm)
+			) {
+				searchResults.push(stringObject);
+			} else if (
+				stringObject[l2] &&
+				stringObject[l2].toLowerCase().includes(searchTerm)
+			) {
+				searchResults.push(stringObject);
+			} else if (stringObject.key.toLowerCase().includes(searchTerm)) {
+				searchResults.push(stringObject);
+			}
+		});
+
+		this.setState({ searchResults });
+	};
+
+	handleSearch = ({ target: { value: searchValue } }) => {
+		this.setState({ searchValue }, () => {
+			this.doSearch();
+		});
+	};
+
+	doIconSearch = debounce(() => this._doIconSearch(), 300);
+
+	_doIconSearch = () => {
+		const { iconSearchValue, allIconsArray } = this.state;
+
+		const searchTerm = iconSearchValue.toLowerCase().trim();
+		const iconSearchResults = [];
+
+		allIconsArray.forEach((iconObject = {}) => {
+			if (iconObject.key.toLowerCase().includes(searchTerm)) {
+				iconSearchResults.push(iconObject);
+			}
+		});
+
+		this.setState({ iconSearchResults });
+	};
+
+	handleIconSearch = ({ target: { value: iconSearchValue } }) => {
+		this.setState({ iconSearchValue }, () => {
+			this.doIconSearch();
+		});
+	};
+
+	setSelectedLanguages = (value, index) => {
+		this.setState((prevState) => {
+			let selection = prevState.selectedLanguages;
+			selection[index] = value;
+
+			return {
+				...prevState,
+				selectedLanguages: selection,
+			};
+		});
+	};
+
+	setSelectedThemes = (value, index) => {
+		this.setState((prevState) => {
+			let selection = prevState.selectedThemes;
+			selection[index] = value;
+
+			return {
+				...prevState,
+				selectedThemes: selection,
+			};
+		});
+	};
+
+	addLanguage = (key) => {
+		const { languageKeys: prevLanguageKeys } = this.state;
+		const languageKeys = [...prevLanguageKeys, key];
+
+		this.setState(
+			{
+				languageKeys,
+			},
+			() => {
+				this.closeAddLanguageModal();
+			}
+		);
+	};
+
+	confirmStringSettings = (keys = [], language) => {
+		const { updateDefaults } = this.props;
+		this.setState(
+			(prevState) => ({
+				...prevState,
+				languageKeys: prevState.languageKeys.filter(
+					(key) => !keys.includes(key)
+				),
+			}),
+			() => {
+				updateDefaults({ language });
+				this.closeStringSettingsModal(true);
+				this.enablePublish();
+			}
+		);
+	};
+
+	openExitConfirmationModal = () => {
+		this.setState({ isExitConfirmationOpen: true });
+	};
+
+	closeExitConfirmationModal = () => {
+		this.setState({ isExitConfirmationOpen: false });
+	};
+
+	openExitConsoleConfirmationModal = () => {
+		this.setState({ isExitConsoleConfirmationOpen: true });
+	};
+
+	closeExitConsoleConfirmationModal = () => {
+		this.setState({ isExitConsoleConfirmationOpen: false });
+	};
+
+	openPublishConfirmationModal = () => {
+		this.setState({ isPublishConfirmationOpen: true });
+	};
+
+	closePublishConfirmationModal = () => {
+		this.setState({ isPublishConfirmationOpen: false });
+	};
+
+	addIcons = (icons = {}, updateSearchResults = false) => {
+		const { updateIcons } = this.props;
+		this.setState(
+			(prevState) => ({
+				iconsOverwrites: merge({}, prevState.iconsOverwrites, icons),
+			}),
+			() => {
+				updateIcons(icons);
+				this.forceRender();
+				this.closeUploadIcon();
+				this.enablePublish();
+				// FIXME
+				if (updateSearchResults) {
+					setTimeout(() => this.openAllIconsModal(), 2500);
+				}
+			}
+		);
+	};
+
+	forceRender = () => {
+		const { activeLanguage, changeLanguage } = this.props;
+		pushTempContent(activeLanguage);
+		changeLanguage(getTempLanguageKey(activeLanguage));
+		this.languageChange = setTimeout(() => changeLanguage(activeLanguage), 300);
+	};
+
+	openUploadIcon = () => {
+		const { allIcons } = this.props;
+		const { editableIconIds } = this.state;
+		const iconsEditData = {};
+
+		if (editableIconIds.length > 0) {
+			Object.keys(allIcons).forEach((theme) => {
+				iconsEditData[theme] = {};
+				editableIconIds.forEach((key) => {
+					iconsEditData[theme][key] = getIconByKey(key, theme, allIcons);
+				});
+			});
+
+			this.setState({
+				iconsEditData,
+				isUploadIconOpen: true,
+			});
+		}
+	};
+
+	closeUploadIcon = () => {
+		this.setState({
+			editableIconIds: [],
+			isUploadIconOpen: false,
+		});
+	};
+
+	removeIcon = (themeKey, iconKey) => {
+		const icons = this.state.iconsOverwrites;
+		let selectedTheme = themeKey && icons?.[themeKey];
+
+		if (!selectedTheme) {
+			selectedTheme = {};
+		}
+
+		let data = {};
+		Object.keys(selectedTheme).forEach((item) => {
+			if (item !== iconKey) {
+				data = {
+					...data,
+					[item]: selectedTheme[item],
+				};
+			}
+		});
+		const iconsOverwrites = {
+			...icons,
+			[themeKey]: data,
+		};
+		const iconsEditData = { ...this.state.iconsEditData };
+		iconsEditData[themeKey] = { [iconKey]: undefined };
+		this.setState({ iconsEditData, iconsOverwrites });
+	};
+
+	openThemeSettings = () => {
+		this.setState({
+			isThemeSettingsOpen: true,
+		});
+	};
+
+	closeThemeSettings = () => {
+		this.setState({
+			isThemeSettingsOpen: false,
+		});
+	};
+
+	addTheme = (themeKey, theme) => {
+		const { updateColor } = this.props;
+		this.setState(
+			(prevState) => ({
+				...prevState,
+				colorOverwrites: {
+					...prevState.colorOverwrites,
+					[themeKey]: theme,
+				},
+			}),
+			() => {
+				const { colorOverwrites } = this.state;
+				updateColor(colorOverwrites);
+				this.enablePublish();
+				this.closeAddTheme();
+			}
+		);
+	};
+
+	confirmThemeSettings = (keys = [], theme) => {
+		const { colorOverwrites: prevColorOverwrites } = this.state;
+		const { removeTheme, updateDefaults } = this.props;
+		const colorOverwrites = {};
+
+		Object.entries(prevColorOverwrites).forEach(([themeKey, theme]) => {
+			if (!keys.includes(themeKey)) {
+				colorOverwrites[themeKey] = theme;
+			}
+		});
+
+		this.setState(
+			{
+				colorOverwrites,
+			},
+			() => {
+				removeTheme(keys);
+				updateDefaults({ theme });
+				this.closeThemeSettings();
+				this.enablePublish();
+			}
+		);
+	};
+
+	openAddTheme = (selectedTheme = '') => {
+		this.closeThemeSettings();
+		this.setState({
+			isAddThemeOpen: true,
+			selectedTheme,
+		});
+	};
+
+	closeAddTheme = () => {
+		this.setState(
+			{
+				isAddThemeOpen: false,
+			},
+			this.openThemeSettings
+		);
+	};
+
+	updateSectionsOrder = (sections) => {
+		const { updateSections } = this.props;
+		updateSections(sections);
+		this.enablePublish();
+		this.closeSectionsModal();
+	};
+
+	updateSections = (sections) => {
+		const { updateSections } = this.props;
+		updateSections(sections);
+		this.enablePublish();
+		this.closeAddSectionModal();
+	};
+
+	openSectionsModal = () => {
+		this.setState({
+			isSectionsModalOpen: true,
+		});
+	};
+
+	closeSectionsModal = () => {
+		this.setState({
+			isSectionsModalOpen: false,
+		});
+	};
+
+	openAddSectionModal = () => {
+		this.setState({
+			isAddSectionOpen: true,
+		});
+	};
+
+	closeAddSectionModal = () => {
+		this.setState(
+			{
+				isAddSectionOpen: false,
+			},
+			this.openSectionsModal
+		);
+	};
+
+	handleTextAreaChange = ({ target: { name, value } }) => {
+		this.setState((prevState) => ({
+			...prevState,
+			injected_html: {
+				...prevState.injected_html,
+				[name]: value,
+			},
+		}));
+	};
+
+	handleRemoveOrUpload = (type, val) => {
+		if (type === 'remove') {
+			this.setState({ isRemove: val });
+		} else if (type === 'removedKeys') {
+			this.setState({ removedKeys: val });
+		} else {
+			this.setState({ isUpload: val });
+		}
+	};
+
+	openConfigsModal = () => {
+		this.setState({
+			isConfigsModalOpen: true,
+		});
+	};
+
+	closeConfigsModal = () => {
+		this.setState({
+			isConfigsModalOpen: false,
+		});
+	};
+
+	updateConfigs = (data) => {
+		const { setAdminSortData } = this.props;
+		setAdminSortData(data);
+		this.enablePublish();
+	};
+
+	openWalletConfigsModal = () => {
+		this.setState({
+			isWalletConfigsModalOpen: true,
+		});
+	};
+
+	closeWalletConfigsModal = () => {
+		this.setState({
+			isWalletConfigsModalOpen: false,
+		});
+	};
+
+	updateWalletConfigs = (data) => {
+		const { setAdminWalletSortData } = this.props;
+		setAdminWalletSortData(data);
+		this.enablePublish();
+	};
+
+	openDigitalAssetsConfigsModal = () => {
+		this.setState({
+			isDigitalAssetsConfigsModalOpen: true,
+		});
+	};
+
+	closeDigitalAssetsConfigsModal = () => {
+		this.setState({
+			isDigitalAssetsConfigsModalOpen: false,
+		});
+	};
+
+	updateDigitalAssetsConfigs = (data) => {
+		const { setAdminDigitalAssetsSortData } = this.props;
+		setAdminDigitalAssetsSortData(data);
+		this.enablePublish();
+	};
+
+	onReset = (themeKey, iconKey) => {
+		const { iconSearchResults, removedKeys: currentRemovedKeys } = this.state;
+		const currentTheme = themeKey === 'white' ? 'white' : 'dark';
+		const removedKey = `${iconKey}__${currentTheme}`;
+
+		const updatedIcons = iconSearchResults?.map((iconObject = {}) => {
+			if (iconObject?.key === iconKey) {
+				return { ...iconObject, [themeKey]: '' };
+			}
+			return { ...iconObject };
+		});
+
+		const storedRemovedKeys =
+			JSON.parse(localStorage.getItem('removedBackgroundItems')) || [];
+		const updatedRemovedKeys = [
+			...new Set([...currentRemovedKeys, ...storedRemovedKeys, removedKey]),
+		];
+
+		this.setState({
+			iconSearchResults: updatedIcons,
+			preview: { [themeKey]: { [iconKey]: undefined } },
+		});
+
+		this.handleRemoveOrUpload('removedKeys', updatedRemovedKeys);
+		this.handleRemoveOrUpload('remove', true);
+		this.removeIcon(themeKey, iconKey);
+	};
+
+	onHandleTabChange = (tab) => {
+		this.setState({
+			activeTab: tab,
+		});
+	};
+
+	onHandleConfirmWaninigPopup = () => {
+		const {
+			isEditMode,
+			isInjectMode,
+			handleEditMode,
+			handleInjectMode,
+		} = this.props;
+		const {
+			isOperatorControls,
+			isAllStringsModalOpen,
+			isThemeSettingsOpen,
+			isAllIconsModalOpen,
+		} = this.state;
+		if (isOperatorControls) {
+			isEditMode && this.exitEditMode();
+			isInjectMode && this.exitInjectMode();
+			this.handleDelayNavigate();
+			this.setState({ isOperatorControls: false });
+		} else if (isEditMode) {
+			this.exitEditMode();
+			!isOperatorControls && handleInjectMode();
+		} else if (isInjectMode) {
+			this.exitInjectMode();
+			!isOperatorControls && handleEditMode();
+		}
+		isAllStringsModalOpen && this.closeAllStringsModal();
+		isThemeSettingsOpen && this.closeThemeSettings();
+		isAllIconsModalOpen && this.closeAllIconsModal();
+		this.setState({ isDisplayWarinigPopup: false });
+	};
+
+	onHandleCloseWarningPopup = () => {
+		this.setState({ isDisplayWarinigPopup: false, isOperatorControls: false });
+	};
+
+	render() {
+		const {
+			isPublishEnabled,
+			isEditModalOpen,
+			editData,
+			languageKeys,
+			editableElementIds,
+			isSaveEnabled,
+			isAllStringsModalOpen,
+			searchResults,
+			searchValue,
+			languageOptions,
+			selectedLanguages,
+			isStringsSettingsOpen,
+			isExitConfirmationOpen,
+			isExitConsoleConfirmationOpen,
+			isAddLanguageModalOpen,
+			isPublishConfirmationOpen,
+			iconsEditData,
+			isUploadIconOpen,
+			editableIconIds,
+			isThemeSettingsOpen,
+			isAddThemeOpen,
+			selectedTheme,
+			isAllIconsModalOpen,
+			selectedThemes,
+			iconSearchValue,
+			iconSearchResults,
+			isSectionsModalOpen,
+			isConfigsModalOpen,
+			isWalletConfigsModalOpen,
+			isDigitalAssetsConfigsModalOpen,
+			isAddSectionOpen,
+			injected_html,
+			isRemove,
+			isUpload,
+			removedKeys,
+			isDisplayWarinigPopup,
+		} = this.state;
+		const {
+			isEditMode,
+			color: themes,
+			themeOptions,
+			sections,
+			isInjectMode,
+		} = this.props;
+
+		return (
+			<div
+				className={classnames('operator-controls__wrapper', {
+					open: isEditMode || isInjectMode,
+					'operator-controls__details': isEditMode || isInjectMode,
+				})}
+			>
+				<div className="operator-controls__buttons-wrapper">
+					<div
+						className={classnames('operator-controls__button', {})}
+						onClick={this.toggleEditMode}
+					>
+						<EditFilled />
+						<span className="pl-1">
+							{`${isEditMode ? 'Exit' : 'Enter'} edit mode`}
+						</span>
+					</div>
+					<div className={classnames('operator-controls__button', {})}>
+						{!isEditMode && !isInjectMode ? (
+							<Link to="/admin">
+								<SettingFilled />
+								<span className="pl-1">Operator controls</span>
+							</Link>
+						) : (
+							<div
+								onClick={() =>
+									this.setState({
+										isDisplayWarinigPopup: true,
+										isOperatorControls: true,
+									})
+								}
+							>
+								<SettingFilled />
+								<span className="pl-1">Operator controls</span>
+							</div>
+						)}
+					</div>
+					<div
+						className={classnames('operator-controls__button', {})}
+						onClick={this.toggleInjectMode}
+					>
+						<span>{`</>`}</span>
+						<span className="pl-1">
+							{!isInjectMode ? 'Console' : 'Exit Console'}
+						</span>
+					</div>
+				</div>
+				<div
+					className={classnames('operator-controls__panel', {
+						deep: isInjectMode,
+					})}
+				>
+					{isEditMode && !isInjectMode && (
+						<Fragment>
+							<div className="operator-controls__panel-list">
+								<div
+									className="operator-controls__panel-item"
+									onClick={this.openAllStringsModal}
+								>
+									All strings
+								</div>
+								<div
+									className="operator-controls__panel-item"
+									onClick={this.openThemeSettings}
+								>
+									Themes
+								</div>
+								<div
+									className="operator-controls__panel-item"
+									onClick={this.openAllIconsModal}
+								>
+									All graphics
+								</div>
+							</div>
+							<div className="d-flex align-items-center">
+								<Button
+									type="primary"
+									onClick={this.openPublishConfirmationModal}
+									className="operator-controls__publish-button bold"
+									disabled={!isPublishEnabled}
+								>
+									Publish
+								</Button>
+							</div>
+						</Fragment>
+					)}
+					{isInjectMode && !isEditMode && (
+						<div className="w-100 h-100">
+							<div className="d-flex justify-content-end">
+								<div className="d-flex align-items-center">
+									<Button
+										type="primary"
+										onClick={this.openPublishConfirmationModal}
+										className="operator-controls__publish-button small bold"
+										disabled={isEqual(injected_html, this.props.injected_html)}
+										style={{ zIndex: 1 }}
+									>
+										Publish
+									</Button>
+								</div>
+							</div>
+							<Tabs
+								className="w-100 h-100"
+								activeKey={this.state.activeTab}
+								onChange={this.onHandleTabChange}
+							>
+								{TAB_KEYS.map((key) => {
+									const title = `${'<'}${key.toUpperCase()}${'>'}`;
+									const placeholder = `${'<'}!-- In this section you can insert any HTML code to the ${title} of your website --${'>'}`;
+									return (
+										<TabPane className="w-100 h-100" tab={title} key={key}>
+											<div className="w-100 h-100 operator-console">
+												<TextArea
+													name={key}
+													placeholder={placeholder}
+													onChange={this.handleTextAreaChange}
+													value={injected_html[key]}
+													style={{ resize: 'none' }}
+													className="w-100 h-100"
+												/>
+											</div>
+										</TabPane>
+									);
+								})}
+							</Tabs>
+						</div>
+					)}
+				</div>
+
+				<Modal
+					isOpen={isEditMode && isEditModalOpen}
+					label="operator-controls-modal"
+					className="operator-controls__modal"
+					onCloseDialog={this.closeEditModal}
+					shouldCloseOnOverlayClick={true}
+					showCloseText={true}
+					bodyOpenClassName="operator-controls__modal-open"
+				>
+					<div className="operator-controls__modal-title pb-3">Edit string</div>
+					{isEditMode &&
+						isEditModalOpen &&
+						editableElementIds.map((key) => {
+							return (
+								<div className="pb-3" key={key}>
+									<Divider orientation="left">
+										<span className="operator-controls__string-key">
+											<KeyOutlined /> {key}
+										</span>
+									</Divider>
+									{languageKeys.map((lang) => {
+										return (
+											<String
+												key={lang}
+												label={this.getLanguageLabel(lang)}
+												onReset={() => this.getDefaultString(key, lang)}
+												name={generateInputName(key, lang)}
+												value={editData[lang][key]}
+												onChange={this.handleInputChange}
+												onAddLink={this.handleAddLink}
+											/>
+										);
+									})}
+								</div>
+							);
+						})}
+					<div
+						className="underline-text pointer pl-2 pt-4"
+						onClick={() => {
+							this.closeEditModal();
+							this.openAllStringsModal();
+						}}
+					>
+						View all strings
+					</div>
+					<div className="pt-5">
+						<Button
+							block
+							type="primary"
+							size="large"
+							disabled={!isSaveEnabled}
+							onClick={this.handleSave}
+							className="operator-controls__save-button"
+						>
+							Save
+						</Button>
+					</div>
+				</Modal>
+				{isAllIconsModalOpen && (
+					<AllIconsModal
+						isOpen={isEditMode && isAllIconsModalOpen}
+						icons={iconSearchResults}
+						onCloseDialog={this.closeAllIconsModal}
+						onSearch={this.handleIconSearch}
+						searchValue={iconSearchValue}
+						themeOptions={themeOptions}
+						onSelect={this.setSelectedThemes}
+						selectedThemes={selectedThemes}
+						onRowClick={this.handleEditButton}
+						// onSettingsClick={this.openStringSettingsModal}
+						onSave={this.addIcons}
+						onReset={this.onReset}
+						removedKeys={removedKeys}
+					/>
+				)}
+				{isAllStringsModalOpen && (
+					<AllStringsModal
+						isOpen={isEditMode && isAllStringsModalOpen}
+						strings={searchResults}
+						onCloseDialog={this.closeAllStringsModal}
+						onSearch={this.handleSearch}
+						searchValue={searchValue}
+						languageOptions={languageOptions}
+						onSelect={this.setSelectedLanguages}
+						selectedLanguages={selectedLanguages}
+						onRowClick={this.handleEditButton}
+						onSettingsClick={this.openStringSettingsModal}
+					/>
+				)}
+				<StringSettingsModal
+					isOpen={isEditMode && isStringsSettingsOpen}
+					onCloseDialog={this.closeStringSettingsModal}
+					languages={languageOptions}
+					onAddLanguageClick={this.openAddLanguageModal}
+					onConfirm={this.confirmStringSettings}
+					defaultLanguage={this.props.defaults.language}
+				/>
+				{isAddLanguageModalOpen && (
+					<AddLanguageModal
+						isOpen={isEditMode && isAddLanguageModalOpen}
+						onCloseDialog={this.closeAddLanguageModal}
+						languages={LANGUAGES.filter(
+							({ value }) => !languageKeys.includes(value)
+						)}
+						onSave={this.addLanguage}
+					/>
+				)}
+				{isUploadIconOpen && (
+					<UploadIcon
+						iconsEditData={iconsEditData}
+						themeOptions={themeOptions}
+						editId={editableIconIds}
+						isOpen={isUploadIconOpen}
+						onCloseDialog={this.closeUploadIcon}
+						onSave={this.addIcons}
+						removeIcon={this.removeIcon}
+						isRemove={isRemove}
+						isUpload={isUpload}
+						removedKeys={removedKeys}
+						handleRemoveOrUpload={this.handleRemoveOrUpload}
+					/>
+				)}
+				{isThemeSettingsOpen && (
+					<ThemeSettings
+						isOpen={isEditMode && isThemeSettingsOpen}
+						onCloseDialog={this.closeThemeSettings}
+						themes={themeOptions}
+						onAddThemeClick={this.openAddTheme}
+						onConfirm={this.confirmThemeSettings}
+						defaultTheme={this.props.defaults.theme}
+					/>
+				)}
+				{isAddThemeOpen && (
+					<AddTheme
+						isOpen={isEditMode && isAddThemeOpen}
+						onCloseDialog={this.closeAddTheme}
+						selectedTheme={selectedTheme}
+						themes={themes}
+						onSave={this.addTheme}
+					/>
+				)}
+
+				{isSectionsModalOpen && (
+					<SectionsModal
+						isOpen={isEditMode && isSectionsModalOpen}
+						onCloseDialog={this.closeSectionsModal}
+						sections={sections}
+						onSave={this.updateSectionsOrder}
+						onLinkClick={this.openAddSectionModal}
+					/>
+				)}
+
+				{isAddSectionOpen && (
+					<AddSection
+						isOpen={isEditMode && isAddSectionOpen}
+						onCloseDialog={this.closeAddSectionModal}
+						sections={sections}
+						onSave={this.updateSections}
+					/>
+				)}
+
+				{isConfigsModalOpen && (
+					<ConfigsModal
+						isOpen={isEditMode && isConfigsModalOpen}
+						onCloseDialog={this.closeConfigsModal}
+						onConfirm={this.updateConfigs}
+					/>
+				)}
+
+				{isWalletConfigsModalOpen && (
+					<WalletConfigsModal
+						isOpen={isEditMode && isWalletConfigsModalOpen}
+						onCloseDialog={this.closeWalletConfigsModal}
+						onConfirm={this.updateWalletConfigs}
+					/>
+				)}
+
+				{isDigitalAssetsConfigsModalOpen && (
+					<DigitalAssetsConfigsModal
+						isOpen={isEditMode && isDigitalAssetsConfigsModalOpen}
+						onCloseDialog={this.closeDigitalAssetsConfigsModal}
+						onConfirm={this.updateDigitalAssetsConfigs}
+					/>
+				)}
+
+				<Modal
+					isOpen={isExitConfirmationOpen}
+					label="operator-controls-modal"
+					className="operator-controls__modal"
+					onCloseDialog={this.closeExitConfirmationModal}
+					shouldCloseOnOverlayClick={true}
+					showCloseText={true}
+					bodyOpenClassName="operator-controls__modal-open"
+				>
+					<div className="operator-controls__modal-title">Exit</div>
+					<div className="pt-3" style={{ width: '292px' }}>
+						You are about to exit edit mode with some unpublished changes on
+						your exchange
+					</div>
+					<footer className="d-flex justify-content-end pt-4">
+						<Button
+							block
+							className="mr-1 bold"
+							onClick={this.closeExitConfirmationModal}
+						>
+							Cancel
+						</Button>
+						<Button
+							block
+							className="ml-1 bold"
+							type="primary"
+							onClick={this.exitEditMode}
+							danger
+						>
+							Exit
+						</Button>
+					</footer>
+				</Modal>
+				<Modal
+					isOpen={isExitConsoleConfirmationOpen}
+					label="operator-controls-modal"
+					className="operator-controls__modal"
+					onCloseDialog={this.closeExitConsoleConfirmationModal}
+					shouldCloseOnOverlayClick={true}
+					showCloseText={true}
+					bodyOpenClassName="operator-controls__modal-open"
+				>
+					<div className="operator-controls__modal-title">Exit</div>
+					<div className="pt-3" style={{ width: '292px' }}>
+						You are about to close the console with some unpublished changes.
+					</div>
+					<footer className="d-flex justify-content-end pt-4">
+						<Button
+							block
+							className="mr-1 bold"
+							onClick={this.closeExitConsoleConfirmationModal}
+						>
+							Cancel
+						</Button>
+						<Button
+							block
+							className="ml-1 bold"
+							type="primary"
+							onClick={this.exitInjectMode}
+							danger
+						>
+							Exit
+						</Button>
+					</footer>
+				</Modal>
+				<Modal
+					isOpen={isPublishConfirmationOpen}
+					label="operator-controls-modal"
+					className="operator-controls__modal"
+					onCloseDialog={this.closePublishConfirmationModal}
+					shouldCloseOnOverlayClick={true}
+					showCloseText={true}
+					bodyOpenClassName="operator-controls__modal-open"
+				>
+					<div className="operator-controls__modal-title">Publish</div>
+					<div className="pt-3" style={{ width: '292px' }}>
+						Publishing will apply all changes to the live website. Are you sure
+						you want to publish the changes?
+					</div>
+					<footer className="d-flex justify-content-end pt-4">
+						<Button
+							className="mr-1 bold"
+							block
+							onClick={this.closePublishConfirmationModal}
+						>
+							Cancel
+						</Button>
+						<Button
+							block
+							className="ml-1 bold"
+							type="primary"
+							onClick={this.handlePublish}
+							danger
+						>
+							Publish
+						</Button>
+					</footer>
+				</Modal>
+				<Modal
+					isOpen={isDisplayWarinigPopup}
+					label="operator-controls-modal"
+					className="operator-control-edit-mode-warning-popup operator-controls__modal"
+					onCloseDialog={this.onHandleCloseWarningPopup}
+					shouldCloseOnOverlayClick={true}
+					showCloseText={true}
+					bodyOpenClassName="operator-controls__modal-open"
+				>
+					<div className="operator-controls__modal-title">Warning!</div>
+					<div className="pt-3">
+						You are about to exit the{' '}
+						{isEditMode ? 'Edit Mode' : isInjectMode && 'Console'}. Any edits
+						you've made could be lost. Are you sure you want to proceed?
+					</div>
+					<footer className="d-flex justify-content-end pt-4">
+						<Button
+							className="mr-1 bold"
+							block
+							onClick={this.onHandleCloseWarningPopup}
+						>
+							Cancel
+						</Button>
+						<Button
+							block
+							className="ml-1 bold"
+							type="primary"
+							onClick={this.onHandleConfirmWaninigPopup}
+							danger
+						>
+							Okay
+						</Button>
+					</footer>
+				</Modal>
+			</div>
+		);
+	}
+}
+
+const mapStateToProps = (state) => ({
+	activeLanguage: state.app.language,
+	injected_html: state.app.injected_html,
+	constants: state.app.constants,
+	pinned_markets: state.app.pinned_markets,
+	default_sort: state.app.default_sort,
+	pinned_assets: state.app.pinned_assets,
+	default_wallet_sort: state.app.default_wallet_sort,
+	default_digital_assets_sort: state.app.default_digital_assets_sort,
+	isOperatorEdit: state.app.isOperatorEdit,
+	isDisplayConsoleHead: state.app.isDisplayConsoleHead,
+	isDisplayConsoleBody: state.app.isDisplayConsoleBody,
+	isGraphicsEditMode: state.app.isGraphicsEditMode,
+	isThemesEditMode: state.app.isThemesEditMode,
+	isStringsEditMode: state.app.isStringsEditMode,
+});
+
+const mapDispatchToProps = (dispatch) => ({
+	changeLanguage: bindActionCreators(setLanguage, dispatch),
+	setAdminSortData: bindActionCreators(setAdminSortData, dispatch),
+	setAdminWalletSortData: bindActionCreators(setAdminWalletSortData, dispatch),
+	setAdminDigitalAssetsSortData: bindActionCreators(
+		setAdminDigitalAssetsSortData,
+		dispatch
+	),
+	setDashToken: bindActionCreators(setDashToken, dispatch),
+	setEditMode: bindActionCreators(setEditMode, dispatch),
+	setIsDisplayConsoleHead: bindActionCreators(
+		setIsDisplayConsoleHead,
+		dispatch
+	),
+	setIsDisplayConsoleBody: bindActionCreators(
+		setIsDisplayConsoleBody,
+		dispatch
+	),
+	setIsGraphicsEditMode: bindActionCreators(setIsGraphicsEditMode, dispatch),
+	setIsThemesEditMode: bindActionCreators(setIsThemesEditMode, dispatch),
+	setIsStringsEditMode: bindActionCreators(setIsStringsEditMode, dispatch),
+});
+
+export default connect(
+	mapStateToProps,
+	mapDispatchToProps
+)(withRouter(withEdit(withConfig(OperatorControls))));

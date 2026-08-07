@@ -1,0 +1,84 @@
+const { Trade } = require('../db/models');
+const { loggerWebsocket } = require('../config/logger');
+
+
+async function getOraclePricesUtils(req, res) {
+    let { assets, quote = 'usdt', amount = 1 } = req.query;
+
+    if (!assets) {
+        return res.status(400).json({ message: 'assets is required' });
+    }
+
+    if (typeof assets === 'string') {
+        assets = assets.split(',');
+    }
+
+    quote = typeof quote === 'string' && quote !== 'undefined'
+        ? quote.toLowerCase()
+        : 'usdt';
+
+    amount = Number(amount) > 0 ? Number(amount) : 1;
+
+    const prices = {};
+
+    for (const asset of assets) {
+        const symbol = `${asset}-${quote}`;
+
+        const trade = await Trade.findOne({
+            where: { symbol },
+            order: [['created_at', 'DESC']]
+        });
+
+        prices[asset] = trade
+            ? Number(trade.price) * amount
+            : null;
+    }
+
+    // ⚠️ ВАЖНО: возвращаем ТОЛЬКО prices
+    return res.json(prices);
+}
+
+
+async function _getOraclePricesUtils(req, res) {
+    let { assets, quote = 'usdt', amount = 1 } = req.query;
+    loggerWebsocket.error('===||=== quote',quote);
+    if (!assets) {
+        return res.status(400).json({ message: 'assets is required' });
+    }
+
+    if (typeof assets === 'string') {
+        assets = assets.split(',');
+    }
+
+    quote = typeof quote === 'string' && quote !== 'undefined'
+        ? quote.toLowerCase()
+        : 'usdt';
+
+    amount = Number(amount) > 0 ? Number(amount) : 1;
+
+    const result = {};
+
+    for (const asset of assets) {
+        const symbol = `${asset}-${quote}`;
+
+        const trade = await Trade.findOne({
+            where: { symbol },
+            order: [['created_at', 'DESC']]
+        });
+
+        result[asset] = trade
+            ? trade.price * amount
+            : null;
+    }
+
+    return res.json({
+        quote,
+        amount,
+        prices: result
+    });
+}
+
+module.exports = {
+    getOraclePricesUtils
+};
+

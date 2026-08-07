@@ -1,0 +1,615 @@
+package main
+
+import (
+    "context"
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "log"
+    "math"
+    "math/rand"
+    "net/http"
+    "os"
+    "os/signal"
+    "strconv"
+    "strings"
+    "syscall"
+    "time"
+
+    "github.com/joho/godotenv"
+    _ "github.com/lib/pq"
+)
+
+// Конфигурация из переменных окружения
+type Config struct {
+    BinancePollInterval time.Duration
+    ForkPollInterval    time.Duration
+    DBDSN               string
+    HTTPPort            string
+    ReloadInterval      time.Duration
+}
+
+// Пара из базы данных
+type PairConfig struct {
+    Symbol              string  `json:"symbol"`
+    PriceSource         string  `json:"price_source"`
+    PriceAnchor         string  `json:"price_anchor"`
+    PriceTarget         float64 `json:"price_target"`
+    PriceVolatility     float64 `json:"price_volatility"`
+    PriceCorr           float64 `json:"price_corr"`
+    PriceMin            float64 `json:"price_min"`
+    PriceMax            float64 `json:"price_max"`
+    PriceFreeze         bool    `json:"price_freeze"`
+    PriceUpdateInterval string  `json:"price_update_interval"`
+    Active              bool    `json:"active"`
+}
+
+var db *sql.DB
+var config Config
+
+// ------------------ КОНФИГУРАЦИЯ ------------------
+
+// Загрузка конфигурации из .env файла
+func LoadConfig() error {
+    // Загружаем .env файл из /opt/forkex/.env
+    err := godotenv.Load("/opt/forkex/.env")
+    if err != nil {
+        log.Printf("Warning: .env file not found, using environment variables: %v", err)
+    }
+    
+    // Читаем настройки
+    binanceInterval := getEnv("BINANCE_POLL_INTERVAL", "3s")
+    forkInterval := getEnv("FORK_POLL_INTERVAL", "7s")
+    reloadInterval := getEnv("RELOAD_INTERVAL", "5m")
+    
+    // Парсим интервалы
+    binanceDur, err := time.ParseDuration(binanceInterval)
+    if err != nil {
+        return fmt.Errorf("invalid BINANCE_POLL_INTERVAL: %v", err)
+    }
+    
+    forkDur, err := time.ParseDuration(forkInterval)
+    if err != nil {
+        return fmt.Errorf("invalid FORK_POLL_INTERVAL: %v", err)
+    }
+    
+    reloadDur, err := time.ParseDuration(reloadInterval)
+    if err != nil {
+        reloadDur = 5 * time.Minute
+    }
+    
+    config = Config{
+        BinancePollInterval: binanceDur,
+        ForkPollInterval:    forkDur,
+        DBDSN:              getEnv("DB_DSN", ""),
+        HTTPPort:           getEnv("HTTP_PORT", "8080"),
+        ReloadInterval:     reloadDur,
+    }
+    
+    if config.DBDSN == "" {
+        return fmt.Errorf("DB_DSN environment variable is required")
+    }
+    
+    log.Printf("Configuration loaded:")
+    log.Printf("  Binance poll interval: %v", config.BinancePollInterval)
+    log.Printf("  Fork poll interval: %v", config.ForkPollInterval)
+    log.Printf("  HTTP port: %s", config.HTTPPort)
+    log.Printf("  Reload interval: %v", config.ReloadInterval)
+    
+    return nil
+}
+
+// Вспомогательная функция для получения переменных окружения
+func getEnv(key, defaultValue string) string {
+    value := os.Getenv(key)
+    if value == "" {
+        return defaultValue
+    }
+    return value
+}
+
+// ------------------ DB ФУНКЦИИ ------------------
+
+// Загрузка пар из базы данных
+func LoadPairsFromDB() ([]PairConfig, error) {
+    query := `
+        SELECT 
+            symbol,
+            price_source,
+            price_anchor,
+            price_target,
+            price_volatility,
+            price_corr,
+            price_min,
+            price_max,
+            price_freeze,
+            price_update_interval,
+            active
+        FROM pairs 
+        WHERE active = true
+        AND price_source IN ('binance', 'derived', 'kucoin', 'static')
+        ORDER BY symbol
+    `
+
+    rows, err := db.Query(query)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var pairs []PairConfig
+    for rows.Next() {
+        var p PairConfig
+        var updateInterval sql.NullString
+        
+        err := rows.Scan(
+            &p.Symbol,
+            &p.PriceSource,
+            &p.PriceAnchor,
+            &p.PriceTarget,
+            &p.PriceVolatility,
+            &p.PriceCorr,
+            &p.PriceMin,
+            &p.PriceMax,
+            &p.PriceFreeze,
+            &updateInterval,
+            &p.Active,
+        )
+        if err != nil {
+            log.Printf("Error scanning pair: %v", err)
+            continue
+        }
+        
+        if updateInterval.Valid {
+            p.PriceUpdateInterval = updateInterval.String
+        } else {
+            p.PriceUpdateInterval = "00:00:07" // default
+        }
+        
+        pairs = append(pairs, p)
+    }
+    
+    return pairs, nil
+}
+
+// Обновление цены в базе данных
+func UpdatePairPrice(symbol string, price float64, source string) error {
+    // Сначала обновляем таблицу pairs
+    query := `
+        UPDATE pairs 
+        SET estimated_price = $1,
+            last_price_at = NOW(),
+            updated_at = NOW()
+        WHERE symbol = $2
+        RETURNING id
+    `
+    
+    var pairId int
+    err := db.QueryRow(query, price, symbol).Scan(&pairId)
+    if err != nil {
+        log.Printf("Error updating price in pairs for %s: %v", symbol, err)
+        return err
+    }
+    
+    // Сохраняем в market_prices для истории
+    _, err = db.Exec(`
+        INSERT INTO market_prices(symbol, price, source, updated_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (symbol) 
+        DO UPDATE SET 
+            price = EXCLUDED.price,
+            source = EXCLUDED.source,
+            updated_at = EXCLUDED.updated_at
+    `, symbol, price, source)
+    
+    if err != nil {
+        log.Printf("Error saving to market_prices: %v", err)
+        return err
+    }
+    
+    return nil
+}
+
+// Получение текущей цены
+func GetCurrentPrice(symbol string) float64 {
+    var price float64
+    err := db.QueryRow(
+        `SELECT estimated_price FROM pairs WHERE symbol = $1`, 
+        symbol,
+    ).Scan(&price)
+    
+    if err != nil {
+        return 0
+    }
+    return price
+}
+
+// ------------------ БИРЖЕВЫЕ API ------------------
+
+// Binance API
+func GetBinancePrice(symbol string) (float64, error) {
+    pair := strings.ToUpper(strings.ReplaceAll(symbol, "-", ""))
+    url := fmt.Sprintf(
+        "https://api.binance.com/api/v3/ticker/price?symbol=%s", 
+        pair,
+    )
+
+    resp, err := http.Get(url)
+    if err != nil {
+        return 0, err
+    }
+    defer resp.Body.Close()
+
+    var data struct {
+        Price string `json:"price"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+        return 0, err
+    }
+
+    return strconv.ParseFloat(data.Price, 64)
+}
+
+// KuCoin API
+func GetKuCoinPrice(symbol string) (float64, error) {
+    pair := strings.ToUpper(strings.ReplaceAll(symbol, "-", "-"))
+    url := fmt.Sprintf(
+        "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=%s",
+        pair,
+    )
+
+    resp, err := http.Get(url)
+    if err != nil {
+        return 0, err
+    }
+    defer resp.Body.Close()
+
+    var data struct {
+        Data struct {
+            Price string `json:"price"`
+        } `json:"data"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+        return 0, err
+    }
+
+    return strconv.ParseFloat(data.Data.Price, 64)
+}
+
+// ------------------ ОРАКУЛЬНЫЕ ЦИКЛЫ ------------------
+
+// Anchor пары (binance/kucoin)
+func AnchorPriceLoop(pair PairConfig) {
+    var interval time.Duration
+    if pair.PriceUpdateInterval != "" {
+        parsed, err := time.ParseDuration(pair.PriceUpdateInterval)
+        if err == nil {
+            interval = parsed
+        } else {
+            interval = config.BinancePollInterval
+        }
+    } else {
+        interval = config.BinancePollInterval
+    }
+    
+    ticker := time.NewTicker(interval)
+    
+    for {
+        if pair.PriceFreeze {
+            <-ticker.C
+            continue
+        }
+        
+        var price float64
+        var source string
+        var err error
+        
+        switch pair.PriceSource {
+        case "binance":
+            price, err = GetBinancePrice(pair.Symbol)
+            source = "binance"
+        case "kucoin":
+            price, err = GetKuCoinPrice(pair.Symbol)
+            source = "kucoin"
+        default:
+            err = fmt.Errorf("unsupported source: %s", pair.PriceSource)
+        }
+        
+        if err == nil && price > 0 {
+            if pair.PriceMin > 0 && price < pair.PriceMin {
+                price = pair.PriceMin
+            }
+            if pair.PriceMax > 0 && price > pair.PriceMax {
+                price = pair.PriceMax
+            }
+            
+            err = UpdatePairPrice(pair.Symbol, price, source)
+            if err == nil {
+                log.Printf("[anchor] %s = %.8f (%s)", pair.Symbol, price, source)
+            }
+        } else if err != nil {
+            log.Printf("[anchor] Error for %s: %v", pair.Symbol, err)
+        }
+        
+        <-ticker.C
+    }
+}
+
+// Derived пары
+func DerivedPriceLoop(pair PairConfig) {
+    var interval time.Duration
+    if pair.PriceUpdateInterval != "" {
+        parsed, err := time.ParseDuration(pair.PriceUpdateInterval)
+        if err == nil {
+            interval = parsed
+        } else {
+            interval = config.ForkPollInterval
+        }
+    } else {
+        interval = config.ForkPollInterval
+    }
+    
+    ticker := time.NewTicker(interval)
+    
+    for {
+        if pair.PriceFreeze {
+            <-ticker.C
+            continue
+        }
+        
+        anchorPrice := GetCurrentPrice(pair.PriceAnchor)
+        if anchorPrice == 0 {
+            <-ticker.C
+            continue
+        }
+        
+        basePrice := anchorPrice * pair.PriceTarget
+        
+        if pair.PriceVolatility > 0 {
+            noise := (rand.Float64()*2 - 1) * pair.PriceVolatility
+            basePrice = basePrice * (1 + noise)
+        }
+        
+        lastPrice := GetCurrentPrice(pair.Symbol)
+        
+        if lastPrice > 0 {
+            maxMove := lastPrice * 0.01
+            if math.Abs(basePrice-lastPrice) > maxMove {
+                if basePrice > lastPrice {
+                    basePrice = lastPrice + maxMove
+                } else {
+                    basePrice = lastPrice - maxMove
+                }
+            }
+        }
+        
+        if pair.PriceMin > 0 && basePrice < pair.PriceMin {
+            basePrice = pair.PriceMin
+        }
+        if pair.PriceMax > 0 && basePrice > pair.PriceMax {
+            basePrice = pair.PriceMax
+        }
+        
+        err := UpdatePairPrice(pair.Symbol, basePrice, "derived")
+        if err == nil {
+            log.Printf("[derived] %s = %.8f (anchor: %.8f)", 
+                pair.Symbol, basePrice, anchorPrice)
+        }
+        
+        <-ticker.C
+    }
+}
+
+// Static пары
+func StaticPriceLoop(pair PairConfig) {
+    interval := 30 * time.Second
+    ticker := time.NewTicker(interval)
+    
+    for {
+        if pair.PriceTarget > 0 {
+            current := GetCurrentPrice(pair.Symbol)
+            if math.Abs(current-pair.PriceTarget) > 0.00000001 {
+                err := UpdatePairPrice(pair.Symbol, pair.PriceTarget, "static")
+                if err == nil {
+                    log.Printf("[static] %s = %.8f", pair.Symbol, pair.PriceTarget)
+                }
+            }
+        }
+        <-ticker.C
+    }
+}
+
+// ------------------ МОНИТОРИНГ ------------------
+
+// Перезагрузка конфигурации
+func ReloadConfig() {
+    log.Println("Reloading configuration from database...")
+    
+    pairs, err := LoadPairsFromDB()
+    if err != nil {
+        log.Printf("Error loading pairs: %v", err)
+        return
+    }
+    
+    log.Printf("Loaded %d active pairs from database", len(pairs))
+    
+    for _, pair := range pairs {
+        if !pair.Active {
+            continue
+        }
+        
+        switch pair.PriceSource {
+        case "binance", "kucoin":
+            go AnchorPriceLoop(pair)
+            log.Printf("Started anchor loop for %s (%s)", 
+                pair.Symbol, pair.PriceSource)
+        case "derived":
+            go DerivedPriceLoop(pair)
+            log.Printf("Started derived loop for %s (anchor: %s)", 
+                pair.Symbol, pair.PriceAnchor)
+        case "static":
+            go StaticPriceLoop(pair)
+            log.Printf("Started static loop for %s", pair.Symbol)
+        default:
+            log.Printf("Unknown price source for %s: %s", 
+                pair.Symbol, pair.PriceSource)
+        }
+    }
+}
+
+// HTTP обработчики
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+    pairs, err := LoadPairsFromDB()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    
+    type PairStatus struct {
+        Symbol      string  `json:"symbol"`
+        Source      string  `json:"source"`
+        Price       float64 `json:"price"`
+        LastUpdate  string  `json:"last_update"`
+        IsActive    bool    `json:"is_active"`
+    }
+    
+    var statuses []PairStatus
+    for _, p := range pairs {
+        price := GetCurrentPrice(p.Symbol)
+        
+        var lastUpdate string
+        err := db.QueryRow(
+            `SELECT to_char(last_price_at, 'YYYY-MM-DD HH24:MI:SS') 
+             FROM pairs WHERE symbol = $1`,
+            p.Symbol,
+        ).Scan(&lastUpdate)
+        if err != nil {
+            lastUpdate = "never"
+        }
+        
+        statuses = append(statuses, PairStatus{
+            Symbol:     p.Symbol,
+            Source:     p.PriceSource,
+            Price:      price,
+            LastUpdate: lastUpdate,
+            IsActive:   p.Active,
+        })
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(statuses)
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+    if err := db.Ping(); err != nil {
+        http.Error(w, "Database connection failed", http.StatusServiceUnavailable)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("OK"))
+}
+
+func handleReload(w http.ResponseWriter, r *http.Request) {
+    if r.Method != "POST" {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    ReloadConfig()
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte("Configuration reloaded"))
+}
+
+// ------------------ MAIN ------------------
+
+func main() {
+    // Инициализация
+    if err := LoadConfig(); err != nil {
+        log.Fatal("Error loading configuration:", err)
+    }
+    
+    // Подключение к БД
+    var err error
+    db, err = sql.Open("postgres", config.DBDSN)
+    if err != nil {
+        log.Fatal("Error connecting to database:", err)
+    }
+    defer db.Close()
+    
+    // Проверка соединения
+    if err := db.Ping(); err != nil {
+        log.Fatal("Error pinging database:", err)
+    }
+    
+    log.Println(" Connected to database")
+    
+    // Первоначальная загрузка конфигурации
+    ReloadConfig()
+    
+    // Создаем мультиплексор и настраиваем роуты
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte("Price Oracle is running"))
+    })
+    mux.HandleFunc("/status", handleStatus)
+    mux.HandleFunc("/health", handleHealth)
+    mux.HandleFunc("/reload", handleReload)
+    
+    // Создаем HTTP сервер с мультиплексором
+    server := &http.Server{
+        Addr:         ":" + config.HTTPPort,
+        Handler:      mux,  // Важно: указываем мультиплексор!
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 10 * time.Second,
+        IdleTimeout:  60 * time.Second,
+    }
+    
+    // Канал для ошибок сервера
+    serverErr := make(chan error, 1)
+    
+    // Запускаем сервер в горутине
+    go func() {
+        log.Printf("Starting HTTP server on :%s", config.HTTPPort)
+        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            serverErr <- err
+        }
+    }()
+    
+    log.Println(" Price Oracle started")
+    
+    // Таймер для перезагрузки конфига
+    reloadTicker := time.NewTicker(config.ReloadInterval)
+    defer reloadTicker.Stop()
+    
+    // Канал для сигналов остановки
+    stopChan := make(chan os.Signal, 1)
+    signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+    
+    // Основной цикл
+    for {
+        select {
+        case <-reloadTicker.C:
+            log.Println("Reloading configuration...")
+            ReloadConfig()
+            
+        case err := <-serverErr:
+            log.Fatal("HTTP server error:", err)
+            
+        case <-stopChan:
+            log.Println("Shutdown signal received...")
+            
+            // Graceful shutdown
+            ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+            defer cancel()
+            
+            if err := server.Shutdown(ctx); err != nil {
+                log.Printf("Server shutdown error: %v", err)
+            }
+            
+            log.Println("Server stopped")
+            return
+        }
+    }
+}

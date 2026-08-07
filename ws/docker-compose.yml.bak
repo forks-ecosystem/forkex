@@ -1,0 +1,16 @@
+services:
+  websocket:
+    build: .
+    container_name: forkex-ws
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    ports:
+      - "10011:10011"
+    networks:
+      - forkex-network
+
+networks:
+  forkex-network:
+    external: true
+    name: forkex-network

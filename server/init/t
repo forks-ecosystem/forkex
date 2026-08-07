@@ -1,0 +1,91 @@
+// server/init/ticker-updater.js
+'use strict';
+
+const { loggerInit } = require('../config/logger');
+const { updateBasePrices } = require('../utils/getTickersUtilsV2');
+
+class TickerUpdater {
+    constructor(intervalMinutes = 5) {
+        this.intervalMinutes = intervalMinutes;
+        this.updateInterval = null;
+        this.isRunning = false;
+        this.lastUpdate = null;
+        loggerInit.info(`TickerUpdater created with ${intervalMinutes} min interval`);
+    }
+
+    /**
+     * Запуск обновления цен
+     */
+    start() {
+        if (this.isRunning) {
+            loggerInit.warn('Ticker updater is already running');
+            return;
+        }
+
+        loggerInit.info(`Starting ticker price updater (interval: ${this.intervalMinutes} min)`);
+        
+        // Первоначальное обновление
+        this.updatePrices();
+        
+        // Периодическое обновление
+        this.updateInterval = setInterval(() => {
+            this.updatePrices();
+        }, this.intervalMinutes * 60 * 1000);
+        
+        this.isRunning = true;
+        this.lastUpdate = new Date();
+        
+        loggerInit.info('Ticker price updater started successfully');
+    }
+
+    /**
+     * Остановка обновления цен
+     */
+    stop() {
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+        
+        this.isRunning = false;
+        loggerInit.info('Ticker price updater stopped');
+    }
+
+    /**
+     * Обновление цен с обработкой ошибок
+     */
+    async updatePrices() {
+        try {
+            loggerInit.debug('Updating base prices...');
+            await updateBasePrices();
+            this.lastUpdate = new Date();
+            loggerInit.debug('Base prices updated successfully');
+        } catch (error) {
+            loggerInit.error('Error updating base prices:', error.message);
+        }
+    }
+
+    /**
+     * Принудительное обновление
+     */
+    async forceUpdate() {
+        loggerInit.info('Manual price update requested');
+        await this.updatePrices();
+    }
+
+    /**
+     * Получение статуса
+     */
+    getStatus() {
+        return {
+            isRunning: this.isRunning,
+            intervalMinutes: this.intervalMinutes,
+            lastUpdate: this.lastUpdate,
+            nextUpdate: this.isRunning && this.lastUpdate ? 
+                new Date(this.lastUpdate.getTime() + this.intervalMinutes * 60000) : null
+        };
+    }
+}
+
+// Экспортируем класс, а не экземпляр
+module.exports = TickerUpdater;

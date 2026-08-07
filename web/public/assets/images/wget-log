@@ -1,0 +1,11 @@
+--2026-06-09 22:46:44--  http://localhost:8484/forkex/v.php?ix=myimg-Get
+Resolving localhost (localhost)... ::1, 127.0.0.1
+Connecting to localhost (localhost)|::1|:8484... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [image/png]
+Saving to: ‘v.php?ix=myimg-Get’
+
+v.php?ix=myimg-Get                  [<=>                                                   ]       0  --.-KB/s               v.php?ix=myimg-Get                  [ <=>                                                  ]     127  --.-KB/s    in 0s      
+
+2026-06-09 22:46:44 (18.5 MB/s) - ‘v.php?ix=myimg-Get’ saved [127]
+

@@ -1,0 +1,19 @@
+FROM nginx:1.25.3-alpine3.18
+
+# Копируем конфиг
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Создаем директории для сертификатов
+RUN mkdir -p /etc/nginx/letsencrypt/forkex.life
+
+# Создаем директорию для статики (если нужно)
+RUN mkdir -p /var/www/html
+
+RUN apk add --no-cache certbot py-pip && \
+    apk add --no-cache --virtual .build-deps build-base libffi-dev openssl-dev python3-dev && \
+    pip install certbot-nginx && \
+    apk del .build-deps
+
+EXPOSE 80
+EXPOSE 443
+CMD ["nginx", "-g", "daemon off;"]

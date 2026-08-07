@@ -1,0 +1,42 @@
+# /opt/forkex/server/docker-compose.yaml
+services:
+  api:
+    container_name: forkex-api
+    image: forkex-api:v7
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    environment:
+      - NODE_ENV=production
+      - API_PORT=10010
+      - WS_ENABLED=false
+      - WS_URL=ws://websocket:10011/stream
+      - NETWORK_URL=http://api:10010
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: node app.js
+    ports:
+      - "10010:10010"
+    networks:
+      - forkex-network
+  plugins:
+    container_name: forkex-plugins
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    environment:
+      - NODE_ENV=production
+    command: node plugins/index.js
+    ports:
+      - "10012:10012"
+    networks:
+      - forkex-network
+    depends_on:
+      - api
+networks:
+  forkex-network:
+    external: true
+    name: forkex-network

@@ -1,0 +1,140 @@
+'use strict';
+
+const { Trade, Pair } = require('../db/models');
+const { Op } = require('sequelize');
+
+const getTradesUtils = async (params) => {
+  const {
+    user_id,
+    symbol,
+    limit = 50,
+    page = 1,
+    order_by = 'created_at',
+    order = 'desc'
+  } = params.query;
+
+  if (!user_id) {
+    throw new Error('user_id is required');
+  }
+
+  const where = { user_id };
+
+  try {
+    const trades = await Trade.findAll({
+      where,
+      include: [{
+        model: Pair,
+        as: 'Pair',
+        attributes: ['name']
+      }],
+      order: [[order_by, order.toUpperCase()]],
+      limit: Number(limit),
+      offset: (Number(page) - 1) * Number(limit)
+    });
+
+    const data = trades
+      .filter(t => !symbol || t.Pair.name === symbol)
+      .map(t => ({
+        id: t.id,
+        symbol: t.Pair.name,
+        price: Number(t.price),
+        size: Number(t.size),
+        side: t.side,
+        created_at: t.created_at,
+        created_by: t.user_id,
+        order_id: t.order_id || null,
+        fee: t.fee ? Number(t.fee) : 0
+      }));
+
+    return {
+      count: data.length,
+      data
+    };
+  } catch (err) {
+    console.error('GET /user/trades error', err);
+    throw new Error('1.Failed to fetch trades');
+  }
+};
+
+const getAdminTradesUtils = async (params) => {
+  const {
+    limit = 50,
+    page = 1,
+    user_id,
+    symbol,
+    order_by = 'created_at',
+    order = 'desc',
+    start_date,
+    end_date
+  } = params.query;
+
+  try {
+    const whereConditions = {};
+
+    if (user_id) {
+      whereConditions[Op.or] = [
+        { maker_id: user_id },
+        { taker_id: user_id }
+      ];
+    }
+
+    if (start_date || end_date) {
+      whereConditions.created_at = {};
+      if (start_date) whereConditions.created_at[Op.gte] = new Date(start_date);
+      if (end_date) whereConditions.created_at[Op.lte] = new Date(end_date);
+    }
+
+    const include = [
+      {
+        model: Pair,
+        as: 'Pair',
+        attributes: ['name']
+      }
+    ];
+
+    if (symbol) {
+      include[0].where = { name: symbol };
+    }
+
+    const trades = await Trade.findAll({
+      where: whereConditions,
+      include,
+      order: [[order_by, order.toUpperCase()]],
+      limit: Number(limit),
+      offset: (Number(page) - 1) * Number(limit)
+    });
+
+    const data = trades.map(t => ({
+      id: t.id,
+      symbol: t.Pair?.name || t.symbol || '',
+      price: Number(t.price),
+      size: Number(t.size),
+      quantity: t.quantity ? Number(t.quantity) : Number(t.size) * Number(t.price),
+      side: t.side,
+      fee: t.maker_fee ? Number(t.maker_fee) : 0,
+      maker_id: t.maker_id,
+      taker_id: t.taker_id,
+      order_id: t.maker_order_id || t.taker_order_id || null,
+      created_at: t.created_at
+    }));
+
+    return {
+      data,
+      count: data.length,
+      pagination: {
+        total: data.length,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(data.length / Number(limit))
+      }
+    };
+  } catch (err) {
+    console.error('GET /admin/trades error', err);
+    throw new Error('Failed to fetch admin trades');
+  }
+};
+
+module.exports = {
+  getTradesUtils,
+  getAdminTradesUtils
+};

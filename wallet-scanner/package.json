@@ -1,0 +1,9 @@
+{
+  "name": "wallet-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "bitcoinjs-lib": "^6.1.0",
+    "pg": "^8.11.0"
+  }
+}

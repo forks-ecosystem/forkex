@@ -1,0 +1,13 @@
+этот конфиг убираем полностью
+переменные в /opt/forkex/.env
+туда и вставлем
+    "binance_poll_interval": "3s",
+    "fork_poll_interval": "7s",
+
+
+{
+
+    "binance_poll_interval": "3s",
+    "fork_poll_interval": "7s",
+    "db_dsn": "host=localhost port=5432 user=postgres password=yourpassword dbname=hollaex sslmode=disable"
+}

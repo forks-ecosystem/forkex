@@ -1,0 +1,8 @@
+{
+  "label": "LBTC Hot Wallet - Exchange",
+  "address": "LSUsrwZW6qHiwYqU5TgApzprSwY2EbgtAK",
+  "mnemonic": "echo achieve anger keep bubble mesh frown cannon trigger next prevent original",
+  "path": "m/44'/177'/0'/0/0",
+  "created": "2026-06-12",
+  "note": "Hot wallet for LBTC withdrawals. Fund from user deposits."
+}

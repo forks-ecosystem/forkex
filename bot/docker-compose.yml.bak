@@ -1,0 +1,15 @@
+services:
+  forkex-bot:
+    build: .
+    container_name: forkex-bot
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    command: ./forkex-bot
+
+    networks:
+      - forkex-network
+
+networks:
+  forkex-network:
+    external: true

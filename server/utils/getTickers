@@ -1,0 +1,150 @@
+// server/utils/getTickersUtils.js (оптимизированная версия)
+'use strict';
+
+const { Trade, Pair, Coin } = require('../db/models');
+const moment = require('moment');
+
+// Простой кеш в памяти
+let tickersCache = null;
+let lastCacheTime = null;
+const CACHE_DURATION = 5000; // 5 секунд
+
+/**
+ * Create empty ticker data
+ */
+const createEmptyTicker = (symbol) => ({
+    symbol: symbol,
+    last: '0',
+    high: '0',
+    low: '0',
+    open: '0',
+    close: '0',
+    volume: '0',
+    avg_price: '0',
+    price_change: '0%',
+    timestamp: new Date().toISOString()
+});
+
+/**
+ * Get fallback ticker data
+ */
+const getFallbackTickers = () => {
+    const defaultPairs = ['btc-usdt', 'eth-usdt', 'xht-usdt'];
+    const tickers = {};
+    defaultPairs.forEach(symbol => tickers[symbol] = createEmptyTicker(symbol));
+    return tickers;
+};
+
+/**
+ * Process trades for a single symbol
+ */
+const processSymbolTrades = async (symbol, dayAgo) => {
+    try {
+        const trades = await Trade.findAll({
+            attributes: ['price', 'size', 'created_at'],
+            where: {
+                symbol: symbol,
+                created_at: { $gte: dayAgo }
+            },
+            order: [['created_at', 'DESC']],
+            limit: 1000,
+            raw: true
+        });
+
+        if (trades.length === 0) {
+            return createEmptyTicker(symbol);
+        }
+
+        // Находим min/max и вычисляем volume
+        let high = parseFloat(trades[0].price);
+        let low = parseFloat(trades[0].price);
+        let volume = 0;
+        let totalValue = 0;
+
+        trades.forEach(trade => {
+            const price = parseFloat(trade.price);
+            const size = parseFloat(trade.size);
+            
+            if (price > high) high = price;
+            if (price < low) low = price;
+            
+            volume += size;
+            totalValue += price * size;
+        });
+
+        const open = parseFloat(trades[trades.length - 1].price); // Первый trade по времени
+        const close = parseFloat(trades[0].price); // Последний trade
+        const avgPrice = volume > 0 ? totalValue / volume : close;
+        const priceChange = open > 0 ? ((close - open) / open) * 100 : 0;
+
+        return {
+            symbol,
+            last: close.toFixed(8),
+            high: high.toFixed(8),
+            low: low.toFixed(8),
+            open: open.toFixed(8),
+            close: close.toFixed(8),
+            volume: volume.toFixed(8),
+            avg_price: avgPrice.toFixed(8),
+            price_change: priceChange.toFixed(2) + '%',
+            timestamp: new Date().toISOString()
+        };
+
+    } catch (error) {
+        console.error(`Error processing ${symbol}:`, error.message);
+        return createEmptyTicker(symbol);
+    }
+};
+
+/**
+ * Get tickers from local database with caching
+ */
+const getTickersUtils = async (forceRefresh = false) => {
+    // Проверяем кеш
+    if (!forceRefresh && tickersCache && lastCacheTime && 
+        (Date.now() - lastCacheTime) < CACHE_DURATION) {
+        console.log('Returning cached tickers');
+        return tickersCache;
+    }
+
+    try {
+        console.log('Fetching fresh tickers from database...');
+        const dayAgo = moment().subtract(24, 'hours').toDate();
+        
+        // Получаем все активные пары
+        const pairs = await Pair.findAll({
+            include: [{
+                model: Coin,
+                as: 'base_coin',
+                attributes: ['symbol']
+            }, {
+                model: Coin,
+                as: 'quote_coin',
+                attributes: ['symbol']
+            }],
+            where: { active: true },
+            raw: true
+        });
+
+        const tickers = {};
+        const promises = pairs.map(async (pair) => {
+            const symbol = pair.name || `${pair.base_coin.symbol}-${pair.quote_coin.symbol}`;
+            tickers[symbol] = await processSymbolTrades(symbol, dayAgo);
+        });
+
+        await Promise.all(promises);
+        
+        // Обновляем кеш
+        tickersCache = tickers;
+        lastCacheTime = Date.now();
+        
+        return tickers;
+
+    } catch (error) {
+        console.error('Error in getTickersUtils:', error.message);
+        return getFallbackTickers();
+    }
+};
+
+// Экспортируем основную функцию и утилиты
+module.exports = { getTickersUtils };

@@ -1,0 +1,16 @@
+services:
+  price-oracle:
+    build: .
+    container_name: price-oracle
+    restart: unless-stopped
+    env_file:
+      - /opt/forkex/.env
+    command: ./price-oracle
+    ports:
+      - "8082:8082"
+    networks:
+      - forkex-network
+
+networks:
+  forkex-network:
+    external: true

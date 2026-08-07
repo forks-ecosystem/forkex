@@ -1,0 +1,715 @@
+'use strict';
+
+const Network = require('hollaex-network-lib');
+const { all } = require('bluebird');
+const moment = require('moment');
+const rp = require('request-promise');
+const { loggerInit } = require('./config/logger');
+const { Op } = require('sequelize');
+const { User, Status, Tier, Broker, QuickTrade, TransactionLimit, Role, Coin, Pair, Trade, Orderbook, Deposit, Order, Withdrawal, Transaction, UserCoin } = require('./db/models');
+const packageJson = require('./package.json');
+
+const { subscriber, publisher } = require('./db/pubsub');
+const {
+	INIT_CHANNEL,
+	CONFIGURATION_CHANNEL,
+	DEFAULT_FEES,
+	WS_HUB_CHANNEL,
+	HOLLAEX_NETWORK_ENDPOINT,
+	HOLLAEX_NETWORK_BASE_URL,
+	HOLLAEX_NETWORK_PATH_ACTIVATE,
+	setEndpoints,
+	setPermissionDescription,
+	KIT_CONFIG_KEYS,
+	KIT_SECRETS_KEYS
+} = require('./constants');
+const { isNumber, difference } = require('lodash');
+const yaml = require('js-yaml');
+const fs = require('fs');
+const path = require('path');
+
+let nodeLib;
+let tickerUpdater = null;
+
+const getNodeLib = () => nodeLib;
+
+subscriber.on('message', async (channel, message) => {
+	if (channel === INIT_CHANNEL) {
+		const { type } = JSON.parse(message);
+		const delay = (ms) => {
+			return new Promise((resolve) => setTimeout(resolve, ms));
+		};
+		switch (type) {
+			case 'refreshInit':
+				await delay((Math.floor(Math.random() * 5) + 1) * 1000);
+				checkStatus();
+				publisher.publish(
+					WS_HUB_CHANNEL,
+					JSON.stringify({ action: 'restart' })
+				);
+				break;
+			case 'refreshApi':
+				await delay((Math.floor(Math.random() * 5) + 1) * 1000);
+				checkStatus()
+                                .then(async ([deactivatedUsers, nodeLib]) => {
+                                    loggerInit.info('Exchange initialization completed');
+                                    // Автоматический старт тикер-апдайтера
+                                    if (!tickerUpdater || !tickerUpdater.isRunning) {
+                                        startTickerUpdater();
+                                    }
+                                    return [deactivatedUsers, nodeLib];
+                                });
+				break;
+			default:
+				break;
+		}
+	}
+	return;
+});
+
+subscriber.subscribe(INIT_CHANNEL);
+
+const checkStatus = () => {
+	loggerInit.verbose('init/checkStatus', 'checking exchange status');
+
+	let configuration = {
+		coins: {},
+		pairs: {},
+		tiers: {},
+		quicktrade: [],
+		networkQuickTrades: [],
+		kit: {
+			info: {},
+			color: {},
+			interface: {},
+			icons: {},
+			links: {},
+			strings: {},
+			captcha: {},
+			defaults: {},
+			features: {},
+			meta: {},
+			injected_values: [],
+			injected_html: {},
+			user_meta: {},
+			black_list_countries: [],
+			onramp: {},
+			offramp: {},
+			user_payments: {},
+			dust: {},
+			google_oauth: {},
+			auto_deposit: {},
+			auto_withdrawal: {},
+			force_two_factor_authentication_withdrawal: {}
+		},
+		email: {}
+	};
+
+	let secrets = {
+		security: {},
+		accounts: {},
+		captcha: {},
+		emails: {},
+		smtp: {}
+	};
+
+	let frozenUsers = {};
+
+	let version = packageJson.version; // current exchange version
+
+	return Status.findOne({})
+		.then((status) => {
+			loggerInit.info('init/checkStatus');
+			if (!status) {
+				stop();
+				throw new Error('Exchange is not initialized yet');
+			} else if (status.blocked) {
+				stop();
+				throw new Error('Exchange is locked');
+			} else if (!status.activation_code) {
+				stop();
+				throw new Error('Exchange activation code is not set');
+			} else if (!status.api_key || !status.api_secret) {
+				stop();
+				throw new Error('Exchange keys are not set.');
+			} else if (!status.activated) {
+				stop();
+				throw new Error('Exchange is expired');
+			} else {
+				if (status.kit_version != version) {
+					loggerInit.verbose('init/checkStatus version update', version, status.kit_version);
+					status.update({ kit_version: version }, { fields: ['kit_version'] });
+				}
+				secrets = status.secrets;
+				configuration.kit = status.kit;
+
+				// Sync missing email template keys from static files into status.email
+				try {
+					const staticEmailTemplates = loadStaticEmailTemplates();
+					const { updatedEmails, changed } = mergeStatusEmailsWithStatic(status.email || {}, staticEmailTemplates);
+					if (changed) {
+						configuration.email = updatedEmails;
+						// Persist the update so migrations are not required for future runs
+						Status.update(
+							{ email: updatedEmails },
+							{ where: { id: status.id } }
+						);
+						loggerInit.info('init/checkStatus/emailSync applied missing email templates from static files');
+					} else {
+						configuration.email = status.email;
+					}
+				} catch (e) {
+					loggerInit.error('init/checkStatus/emailSync error', e.message);
+					configuration.email = status.email;
+				}
+
+				status.constants.fee_markups = status.kit.coin_customizations;
+				status.constants.auto_deposit = status.kit.auto_deposit;
+				status.constants.auto_withdrawal = status.kit.auto_withdrawal;
+				return all([
+					checkActivation(
+						status.name,
+						status.url,
+						status.activation_code,
+						version,
+						status.constants
+					),
+					Tier.findAll(),
+					Broker.findAll({ attributes: ['id', 'symbol', 'buy_price', 'sell_price', 'paused', 'min_size', 'max_size', 'type', 'formula'] }),
+					QuickTrade.findAll(),
+					TransactionLimit.findAll(),
+					Role.findAll(),
+					status.dataValues
+				]);
+			}
+		})
+		.then(async ([exchange, tiers, deals, quickTrades, transactionLimits, roles, status]) => {
+			loggerInit.info('init/checkStatus/activation', exchange.name, exchange.active);
+
+			const exchangePairs = [];
+
+		for (let coin of exchange.coins) {
+			if (!coin.is_public || !coin.status) continue;
+			if (coin.type === 'fiat') {
+				configuration.coins[coin.symbol] = {
+					...coin,
+					...configuration?.kit?.fiat_fees?.[coin.symbol]
+				};
+			} else {
+				configuration.coins[coin.symbol] = coin;
+			}
+			}
+
+			let hasUpdate = false;
+			for (const [symbol, customization] of Object.entries(status?.kit?.coin_customizations || [])) {
+				if (customization?.fee_markup == null) continue;
+
+				const coin = exchange?.coins?.find((c) => c.symbol === symbol);
+				if (!coin || !coin?.network) continue;
+
+				const networks = coin?.network?.split(',')?.map((n) => n?.trim()?.toLowerCase()) || [];
+
+				for(const network of networks) {
+					if (!customization?.fee_markups?.[network]?.withdrawal?.symbol) continue;
+					if (!coin?.withdrawal_fees?.[network]?.symbol) continue;
+
+					
+					if (customization?.fee_markups?.[network]?.withdrawal?.symbol != coin?.withdrawal_fees?.[network]?.symbol) {
+						hasUpdate = true;
+						customization.fee_markups[network].withdrawal.symbol = coin?.withdrawal_fees?.[network]?.symbol;
+						customization.fee_markups[network].withdrawal.value = 0;
+					}
+				}
+			}
+
+			if (hasUpdate) {
+				Status.update(
+					{ kit: status.kit },
+					{ where: { id: status.id } }
+				);
+			}
+
+		for (let pair of exchange.pairs) {
+			if (!pair.is_public || !pair.active) continue;
+			const normalizedName = pair.name.replace('/', '-').toLowerCase();
+			exchangePairs.push(normalizedName);
+			configuration.pairs[normalizedName] = pair;
+			pair.name = normalizedName;
+		}
+
+			const swaggerYaml = fs.readFileSync('./api/swagger/admin.yaml', 'utf8');
+			const swaggerObj = yaml.load(swaggerYaml);
+
+			const endpoints = extractEndpoints(swaggerObj);
+			const endpointDescriptions = extractEndpointDescriptions(swaggerObj);
+			setEndpoints(endpoints);
+			setPermissionDescription(endpointDescriptions);
+
+			// Sync: ensure admin role has all admin endpoints from swagger
+			try {
+				const adminEndpointsList = [];
+				if (swaggerObj && swaggerObj.paths) {
+					for (const [p, methods] of Object.entries(swaggerObj.paths)) {
+						if (p.startsWith('/admin')) {
+							for (const [m, details] of Object.entries(methods)) {
+								if (!m.startsWith('x-')) {
+									adminEndpointsList.push(`${p}:${m.toLowerCase()}`);
+								}
+							}
+						}
+					}
+				}
+
+				const adminRole = roles.find((r) => r.role_name === 'admin');
+				if (adminRole) {
+					const existingPermissions = Array.isArray(adminRole.permissions) ? adminRole.permissions : [];
+					const missingPermissions = adminEndpointsList.filter((ep) => !existingPermissions.includes(ep));
+
+					// Ensure required admin configs exist based on constants configuration.kit and secrets keys
+					const configKeys = Array.isArray(KIT_CONFIG_KEYS) ? KIT_CONFIG_KEYS : [];
+					const secretKeys = Array.isArray(KIT_SECRETS_KEYS) ? KIT_SECRETS_KEYS : [];
+					const requiredAdminConfigs = Array.from(new Set([...configKeys, ...secretKeys]));
+					const existingConfigs = Array.isArray(adminRole.configs) ? adminRole.configs : [];
+					const missingConfigs = requiredAdminConfigs.filter((c) => !existingConfigs.includes(c));
+
+					let changed = false;
+					if (missingPermissions.length > 0) {
+						adminRole.set('permissions', [...existingPermissions, ...missingPermissions]);
+						loggerInit.info('init/checkStatus/permissions', `added ${missingPermissions.length} new admin permissions`);
+						changed = true;
+					}
+
+					if (missingConfigs.length > 0) {
+						adminRole.set('configs', [...existingConfigs, ...missingConfigs]);
+						loggerInit.info('init/checkStatus/configs', `added ${missingConfigs.length} new admin configs`);
+						changed = true;
+					}
+
+					if (changed) {
+						await adminRole.save();
+					}
+				}
+			} catch (e) {
+				loggerInit.error('init/checkStatus/permissions sync error', e.message);
+			}
+
+			configuration.transaction_limits = transactionLimits;
+			configuration.roles = roles;
+			configuration.broker = deals;
+			configuration.networkQuickTrades = [];
+
+			const brokerPairs = deals.map((d) => d.symbol.replace('/', '-').toLowerCase());
+			const networkBrokerPairs = Object.keys(exchange.brokers).filter((e) => {
+				// only add the network pair if both coins in the market are already subscribed in the exchange
+				const [base, quote] = e.split('-');
+				if (configuration.coins[base] && configuration.coins[quote]) {
+					configuration.networkQuickTrades.push(exchange.brokers[e]);
+					return e;
+				}
+			});
+
+			let quickTradePairs = quickTrades.map((q) => q.symbol.replace('/', '-').toLowerCase());
+
+			// check the status of quickTrades
+			for (let qt of quickTrades) {
+				if (qt.type === 'pro') {
+					const normalizedQtSymbol = qt.symbol.replace('/', '-').toLowerCase();
+					if (!configuration.pairs[normalizedQtSymbol]) {
+						await qt.destroy();
+					}
+				}
+				else if (qt.type === 'broker') {
+					if (!brokerPairs.includes(qt.symbol)) {
+						await qt.destroy();
+					}
+				}
+				else if (qt.type === 'network') {
+					if (!networkBrokerPairs.includes(qt.symbol)) {
+						await qt.destroy();
+					}
+				}
+			}
+
+			// construct the missing quicktrades
+			let newQuickTrades = {};
+			difference(exchangePairs, quickTradePairs).forEach((symbol) => {
+				newQuickTrades[symbol] = { symbol, type: 'pro' };
+			});
+			difference(brokerPairs, quickTradePairs).forEach((symbol) => {
+				// it would override the symbol in the previous condition
+				newQuickTrades[symbol] = { symbol, type: 'broker' };
+			});
+			difference(networkBrokerPairs, quickTradePairs).forEach((symbol) => {
+				// it would override the symbol in the previous conditions
+				newQuickTrades[symbol] = { symbol, type: 'network' };
+			});
+
+			if (Object.keys(newQuickTrades).length > 0) {
+				for (let quicktrade in newQuickTrades) {
+					loggerInit.info('init/checkStatus/activation adding new pair', quicktrade);
+					await QuickTrade.upsert(newQuickTrades[quicktrade]);
+					loggerInit.info('init/checkStatus/activation new pair successfully added', quicktrade);
+				}
+			}
+
+			quickTrades = await QuickTrade.findAll();
+			quickTradePairs = quickTrades.map((q) => q.symbol.replace('/', '-').toLowerCase());
+
+			// build the data for client
+			quickTrades.forEach((qt) => {
+				const normalizedSymbol = qt.symbol.replace('/', '-').toLowerCase();
+				let item = {
+					type: qt.type,
+					symbol: normalizedSymbol,
+					active: qt.active
+				};
+				configuration.quicktrade.push(item);
+			});
+
+			configuration.tradePaths = {};
+
+			for (let tier of tiers) {
+				if (!('maker' in tier.fees)) {
+					tier.fees.maker = {};
+				}
+				if (!('taker' in tier.fees)) {
+					tier.fees.taker = {};
+				}
+				const makerDiff = difference(quickTradePairs, Object.keys(tier.fees.maker));
+				const takerDiff = difference(quickTradePairs, Object.keys(tier.fees.taker));
+
+				if (makerDiff.length > 0 || takerDiff.length > 0) {
+					const fees = {
+						maker: {},
+						taker: {}
+					};
+					const defaultFees = DEFAULT_FEES[exchange.plan]
+						? DEFAULT_FEES[exchange.plan]
+						: { maker: 0.5, taker: 0.5 };
+
+					for (let pair of quickTradePairs) {
+						if (!isNumber(tier.fees.maker[pair])) {
+							fees.maker[pair] = defaultFees.maker;
+						} else {
+							fees.maker[pair] = tier.fees.maker[pair];
+						}
+
+						if (!isNumber(tier.fees.taker[pair])) {
+							fees.taker[pair] = defaultFees.taker;
+						} else {
+							fees.taker[pair] = tier.fees.taker[pair];
+						}
+					}
+
+					const t = await tier.update({ fees }, { fields: ['fees'] });
+
+					configuration.tiers[t.id] = t.dataValues;
+				} else {
+					configuration.tiers[tier.id] = tier.dataValues;
+				}
+			}
+
+			configuration.kit.info = {
+				name: exchange.name,
+				active: exchange.active,
+				exchange_id: exchange.id,
+				user_id: exchange.user_id,
+				url: exchange.url,
+				is_trial: exchange.is_trial,
+				created_at: exchange.created_at,
+				expiry: exchange.expiry,
+				collateral_level: exchange.collateral_level,
+				type: exchange.type,
+				plan: exchange.plan,
+				period: exchange.period,
+				status: true,
+				initialized: status.initialized
+			};
+
+			const networkNodeLib = new Network({
+				apiUrl: HOLLAEX_NETWORK_ENDPOINT,
+				baseUrl: HOLLAEX_NETWORK_BASE_URL,
+				apiKey: status.api_key,
+				apiSecret: status.api_secret,
+				exchange_id: exchange.id,
+				activation_code: exchange.activation_code,
+				kit_version: status.kit_version
+			});
+
+			if (!networkNodeLib) {
+				throw new Error('Node library failed to initialize');
+			}
+
+			nodeLib = networkNodeLib;
+
+			return all([
+				// get deactivated users in the last week. Its only set to week because
+				// the sessions are assumed to be lower than a week for user to be logged in.
+				User.findAll({
+					where: {
+						activated: false,
+						updated_at: {
+							[Op.gt]: moment().subtract(7, 'days').toDate()
+						}
+					}
+				}),
+				networkNodeLib
+			]);
+		})
+		.then(([users, networkNodeLib]) => {
+			loggerInit.info('init/checkStatus/activation', users.length, 'users deactivated');
+
+			for (let user of users) {
+				frozenUsers[user.dataValues.id] = true;
+			}
+
+			publisher.publish(
+				CONFIGURATION_CHANNEL,
+				JSON.stringify({
+					type: 'initial',
+					data: { configuration, secrets, frozenUsers }
+				})
+			);
+			loggerInit.info('init/checkStatus/activation complete');
+			return networkNodeLib;
+		})
+		.catch((err) => {
+			loggerInit.error('init/checkStatus/catch error', err.message);
+			setTimeout(() => {
+				process.exit(1);
+			}, 60000);
+		});
+};
+
+const stop = () => {
+	publisher.publish(CONFIGURATION_CHANNEL, JSON.stringify({ type: 'stop' }));
+};
+
+async function checkActivation(name, url, activation_code, version, constants = {}) {
+    try {
+        const safe = (rows) => Array.isArray(rows)
+            ? rows.map(r => r.dataValues)
+            : [];
+
+        return {
+            id: 1,
+            orderbooks: safe(await Orderbook.findAll()),
+            trades: safe(await Trade.findAll()),
+            coins: safe(await Coin.findAll()),
+            pairs: safe(await Pair.findAll()),
+            brokers: safe(await Broker.findAll()),
+            roles: safe(await Role.findAll()),
+
+            status: "success",
+            message: "Activation successful",
+            name,
+            activation_code,
+            version: version || '2.17.0',
+
+            active: true,
+            activated: true,
+            constants
+        };
+    } catch (err) {
+        console.error('[ACTIVATION ERROR]', err);
+
+        return {
+            status: 'error',
+            message: 'Activation failed',
+            active: false,
+            activated: false
+        };
+    }
+}
+
+function extractEndpoints(swaggerObj) {
+	const result = {};
+
+	if (!swaggerObj.paths) {
+		return result;
+	}
+
+	for (const [path, methods] of Object.entries(swaggerObj.paths)) {
+		const parts = path.replace(/^\/|\/$/g, '').split('/');
+
+		let currentLevel = result;
+
+		for (const part of parts) {
+			if (!currentLevel[part]) {
+				currentLevel[part] = {};
+			}
+			currentLevel = currentLevel[part];
+		}
+
+		for (const [method, _] of Object.entries(methods)) {
+			if (!method.startsWith('x-')) {  // Skip x-* properties
+				currentLevel[method.toLowerCase()] = `${path}:${method.toLowerCase()}`;
+			}
+		}
+	}
+
+	return result;
+}
+
+const extractEndpointDescriptions = (swaggerObj) => {
+	const descriptions = {};
+
+	if (!swaggerObj.paths) {
+		return descriptions;
+	}
+
+	for (const [path, methods] of Object.entries(swaggerObj.paths)) {
+		for (const [method, details] of Object.entries(methods)) {
+			if (!method.startsWith('x-') && details.description) {
+				const endpoint = `${path}:${method.toLowerCase()}`;
+				descriptions[endpoint] = details.description;
+			}
+		}
+	}
+
+	return descriptions;
+};
+
+// Loads static email templates from server/mail/strings/*.json
+function loadStaticEmailTemplates() {
+	const stringsDir = path.join(__dirname, 'mail', 'strings');
+	const result = {};
+
+	try {
+		const files = fs.readdirSync(stringsDir).filter((f) => f.endsWith('.json'));
+		for (const file of files) {
+			try {
+				const fullPath = path.join(stringsDir, file);
+				const raw = fs.readFileSync(fullPath, 'utf8');
+				const parsed = JSON.parse(raw);
+				const lang = Object.keys(parsed)[0];
+				if (lang && parsed[lang] && typeof parsed[lang] === 'object') {
+					result[lang] = parsed[lang];
+				}
+			} catch (e) {
+				loggerInit.error('init/loadStaticEmailTemplates read/parse error', `${file} ${e.message}`);
+			}
+		}
+	} catch (e) {
+		loggerInit.error('init/loadStaticEmailTemplates readdir error', e.message);
+	}
+	return result;
+}
+
+// Merges missing keys from static templates into existing status emails without overriding existing keys
+function mergeStatusEmailsWithStatic(existingEmails = {}, staticTemplates = {}) {
+	const updatedEmails = { ...existingEmails };
+	let changed = false;
+
+	for (const lang of Object.keys(existingEmails)) {
+		const current = { ...(existingEmails[lang] || {}) };
+		const staticForLang = staticTemplates[lang] || staticTemplates['en'] || {};
+
+		for (const key of Object.keys(staticForLang)) {
+			if (!Object.prototype.hasOwnProperty.call(current, key)) {
+				loggerInit.info('init/emailSync/missing_template', `lang=${lang} key=${key}`);
+				current[key] = staticForLang[key];
+				changed = true;
+			}
+		}
+
+		updatedEmails[lang] = current;
+	}
+
+	return { updatedEmails, changed };
+}
+
+/**
+ * Запуск обновления тикеров
+ */
+const startTickerUpdater = () => {
+    try {
+        // Загружаем модуль
+        const TickerUpdater = require('./init/ticker-updater');
+        tickerUpdater = new TickerUpdater(process.env.TICKER_UPDATE_INTERVAL || 5);
+        
+        // Запускаем с задержкой
+        setTimeout(() => {
+            if (tickerUpdater && !tickerUpdater.isRunning) {
+                tickerUpdater.start();
+                loggerInit.info('Ticker price updater started successfully');
+            }
+        }, 10000); // 10 секунд после вызова
+        
+    } catch (error) {
+        loggerInit.error('Ticker updater failed to start:', error.message);
+        tickerUpdater = null;
+    }
+};
+
+/**
+ * Остановка обновления тикеров
+ */
+const stopTickerUpdater = () => {
+    if (tickerUpdater && tickerUpdater.isRunning) {
+        tickerUpdater.stop();
+        loggerInit.info('Ticker price updater stopped');
+    }
+};
+
+/**
+ * Получение статуса тикер-апдайтера
+ */
+const getTickerUpdaterStatus = () => {
+    if (tickerUpdater) {
+        return tickerUpdater.getStatus();
+    }
+    return { isRunning: false, error: 'Not initialized' };
+};
+
+// В subscriber.on('message') исправьте:
+
+subscriber.on('message', async (channel, message) => {
+    if (channel === INIT_CHANNEL) {
+        const { type } = JSON.parse(message);
+        const delay = (ms) => {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        };
+        switch (type) {
+            case 'refreshInit':
+                await delay((Math.floor(Math.random() * 5) + 1) * 1000);
+                // Останавливаем старый апдейтер
+                stopTickerUpdater();
+                // Проверяем статус
+                checkStatus();
+                // Перезапускаем апдейтер
+                startTickerUpdater();
+                
+                publisher.publish(
+                    WS_HUB_CHANNEL,
+                    JSON.stringify({ action: 'restart' })
+                );
+                break;
+                
+            case 'refreshApi':
+                await delay((Math.floor(Math.random() * 5) + 1) * 1000);
+                // Проверяем статус и запускаем апдейтер
+                checkStatus().then(() => {
+                    // Останавливаем если уже запущен
+                    stopTickerUpdater();
+                    // Запускаем заново
+                    startTickerUpdater();
+                });
+                break;
+                
+            default:
+                break;
+        }
+    }
+    return;
+});
+
+// Экспортируйте функции:
+module.exports = {
+    checkStatus,
+    checkActivation,
+    getNodeLib,
+    startTickerUpdater,
+    stopTickerUpdater,
+    getTickerUpdaterStatus
+};

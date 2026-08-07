@@ -1,0 +1,38 @@
+// /opt/forkex/server/api/services/pairs.js
+'use strict';
+
+const { Pair, Coin } = require('../../db/models');
+
+const getPairsFromDB = async () => {
+  const pairs = await Pair.findAll({
+    where: {
+      active: true,
+      is_public: true
+    },
+    include: [
+      { model: Coin, as: 'base_coin', attributes: ['symbol'] },
+      { model: Coin, as: 'quote_coin', attributes: ['symbol'] }
+    ],
+    order: [['id', 'ASC']]
+  });
+
+  return pairs.map(p => ({
+    id: p.id,
+    symbol: p.name,
+    name: p.name,
+    code: p.code,
+    base: p.base_coin?.symbol,
+    quote: p.quote_coin?.symbol,
+    active: true,
+    is_public: true,
+    increment_price: p.increment_price,
+    increment_size: p.increment_size,
+    min_size: p.min_size,
+    max_size: p.max_size,
+    maker_fee: p.maker_fees,
+    taker_fee: p.taker_fees,
+    estimated_price: p.estimated_price || '0'
+  }));
+};
+
+module.exports = { getPairsFromDB };

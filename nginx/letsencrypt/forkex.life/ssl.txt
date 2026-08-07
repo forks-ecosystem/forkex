@@ -1,0 +1,11 @@
+apt install certbot python3-certbot-nginx
+
+Certificate is saved at: /etc/letsencrypt/live/brics-web.online/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/brics-web.online/privkey.pem
+
+
+certbot --nginx -d fork-cex.trade -d www.fork-cex.trade
+
+certbot --nginx -d forkex.life -d www.forkex.life
+
+certbot --nginx -d api.forkex.life

@@ -1,0 +1,143 @@
+diff --git a/price-oracle.go b/price-oracle.go
+index 3333333..4444444 100644
+--- a/price-oracle.go
++++ b/price-oracle.go
+@@ -8,7 +8,6 @@ import (
+     "encoding/json"
+     "fmt"
+     "log"
+-    "net/http"
+     "math"
+     "math/rand"
+     "os"
+@@ -423,73 +422,6 @@ func ReloadConfig() {
+     }
+ }
+ 
+-// HTTP обработчики
+-func handleStatus(w http.ResponseWriter, r *http.Request) {
+-    pairs, err := LoadPairsFromDB()
+-    if err != nil {
+-        http.Error(w, err.Error(), http.StatusInternalServerError)
+-        return
+-    }
+-
+-    type PairStatus struct {
+-        Symbol      string  `json:"symbol"`
+-        Source      string  `json:"source"`
+-        Price       float64 `json:"price"`
+-        LastUpdate  string  `json:"last_update"`
+-        IsActive    bool    `json:"is_active"`
+-    }
+-
+-    var statuses []PairStatus
+-    for _, p := range pairs {
+-        price := GetCurrentPrice(p.Symbol)
+-
+-        var lastUpdate string
+-        err := db.QueryRow(
+-            `SELECT to_char(last_price_at, 'YYYY-MM-DD HH24:MI:SS')
+-             FROM pairs WHERE symbol = $1`,
+-            p.Symbol,
+-        ).Scan(&lastUpdate)
+-        if err != nil {
+-            lastUpdate = "never"
+-        }
+-
+-        statuses = append(statuses, PairStatus{
+-            Symbol:     p.Symbol,
+-            Source:     p.PriceSource,
+-            Price:      price,
+-            LastUpdate: lastUpdate,
+-            IsActive:   p.Active,
+-        })
+-    }
+-
+-    w.Header().Set("Content-Type", "application/json")
+-    json.NewEncoder(w).Encode(statuses)
+-}
+-
+-func handleHealth(w http.ResponseWriter, r *http.Request) {
+-    if err := db.Ping(); err != nil {
+-        http.Error(w, "Database connection failed", http.StatusServiceUnavailable)
+-        return
+-    }
+-    w.WriteHeader(http.StatusOK)
+-    w.Write([]byte("OK"))
+-}
+-
+-func handleReload(w http.ResponseWriter, r *http.Request) {
+-    if r.Method != "POST" {
+-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+-        return
+-    }
+-
+-    ReloadConfig()
+-    w.WriteHeader(http.StatusOK)
+-    w.Write([]byte("Configuration reloaded"))
+-}
+-
+ // ------------------ MAIN ------------------
+ 
+ func main() {
+@@ -518,40 +450,6 @@ func main() {
+ 
+     log.Println(" Connected to database")
+ 
+-    // Первоначальная загрузка конфигурации
++    // Первоначальная загрузка конфигурации и запуск loop-ов
+     ReloadConfig()
+ 
+-    // Создаем мультиплексор и настраиваем роуты
+-    mux := http.NewServeMux()
+-    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+-        w.Write([]byte("Price Oracle is running"))
+-    })
+-    mux.HandleFunc("/status", handleStatus)
+-    mux.HandleFunc("/health", handleHealth)
+-    mux.HandleFunc("/reload", handleReload)
+-
+-    // Создаем HTTP сервер с мультиплексором
+-    server := &http.Server{
+-        Addr:         ":" + config.HTTPPort,
+-        Handler:      mux,
+-        ReadTimeout:  10 * time.Second,
+-        WriteTimeout: 10 * time.Second,
+-        IdleTimeout:  60 * time.Second,
+-    }
+-
+-    serverErr := make(chan error, 1)
+-
+-    go func() {
+-        log.Printf("Starting HTTP server on :%s", config.HTTPPort)
+-        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+-            serverErr <- err
+-        }
+-    }()
+-
+     log.Println(" Price Oracle started")
+ 
+     reloadTicker := time.NewTicker(config.ReloadInterval)
+@@ -566,22 +464,11 @@ func main() {
+         case <-reloadTicker.C:
+             log.Println("Reloading configuration...")
+             ReloadConfig()
+-
+-        case err := <-serverErr:
+-            log.Fatal("HTTP server error:", err)
+ 
+         case <-stopChan:
+             log.Println("Shutdown signal received...")
+-
+-            ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+-            defer cancel()
+-
+-            if err := server.Shutdown(ctx); err != nil {
+-                log.Printf("Server shutdown error: %v", err)
+-            }
+-
+-            log.Println("Server stopped")
++            log.Println("Oracle stopped")
+             return
+         }
+     }

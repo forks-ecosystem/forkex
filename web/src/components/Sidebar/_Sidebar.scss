@@ -1,0 +1,276 @@
+$row--height: 3rem;
+$row--size: calc(#{$row--height} - #{$sidebar-sections-padding});
+
+.sidebar-row {
+	// padding-top: $sidebar-sections-padding / 2;
+	// padding-bottom: $sidebar-sections-padding / 2;
+	min-height: $row--height;
+	min-width: 10rem;
+
+	.cell-wrapper {
+		padding-left: $sidebar-sections-padding;
+		padding-right: $sidebar-sections-padding;
+	}
+}
+
+.app_bar {
+	.sidebar-row {
+		min-width: 3rem;
+	}
+}
+
+.sidebar-bottom-wrapper {
+	min-height: $bottom_bar--height;
+	max-height: $bottom_bar--height;
+	background-color: $bottom-bar--background;
+	color: $base_top-bar-navigation_text;
+	width: 100%;
+	padding: 0.5rem 0.5rem 0.8rem 0.5rem;
+	justify-content: space-around;
+
+	.sidebar-bottom-button-account {
+		.sidebar-bottom-icon {
+			svg {
+				g {
+					.assets-icon-tab {
+						opacity: 0.5;
+					}
+				}
+			}
+		}
+	}
+
+	.sidebar-bottom-button {
+		justify-content: space-between;
+		flex-direction: column;
+		display: flex;
+		align-items: center;
+		width: 20%;
+
+		.sidebar-bottom-icon {
+			svg {
+				.post-icon,
+				.chat-0,
+				.account-svg-1,
+				.quick-trade-tab-active,
+				.assets-icon-tab,
+				.onramp-icon,
+				.item-options {
+					fill: $colors-black;
+				}
+
+				//ToDo: tab-wallet0
+
+				.tab-wallet0,
+				.trade-active-2,
+				.chat-0,
+				.quick-trade-tab-active,
+				.assets-icon-tab,
+				.item-options {
+					stroke: $colors-black;
+				}
+
+				.tab-wallet0,
+				.quick-trade-tab-active {
+					fill: transparent;
+				}
+			}
+		}
+
+		&.active {
+			.sidebar-bottom-icon {
+				svg {
+					.post-icon,
+					.chat-0,
+					.account-svg-1,
+					.assets-icon-tab,
+					.onramp-icon,
+					.item-options {
+						fill: $base_top-bar-navigation_text;
+					}
+
+					.tab-wallet0,
+					.trade-active-2,
+					.chat-0,
+					.quick-trade-tab-active,
+					.assets-icon-tab,
+					.item-options {
+						stroke: $base-top-bar-navigation_text;
+					}
+				}
+			}
+		}
+		.bottom-bar-text {
+			font-size: 9px;
+			text-align: center;
+			margin-top: -17px;
+			font-weight: lighter;
+			color: $base_top-bar-navigation_text-inactive;
+			white-space: nowrap;
+			width: 100%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.bottom-text-acttive {
+			color: $base_top-bar-navigation_text !important;
+			font-weight: bolder;
+		}
+		.sidebar-bottom-icon {
+			@include size(3rem);
+			> div {
+				display: flex;
+				justify-content: center;
+			}
+			svg {
+				@include size(3rem);
+				stroke: $colors-deactivate-color2;
+				fill: transparent;
+			}
+		}
+		img.sidebar-bottom-icon {
+			@include size(3rem);
+		}
+	}
+}
+
+.mobile-trade-wrapper {
+	position: absolute;
+	bottom: 170%;
+	width: 60%;
+	justify-content: space-evenly;
+	.quick-trade-footer-icon,
+	.pro-trade-footer-icon {
+		margin-top: 25%;
+	}
+	.quick-trade-footer-icon {
+		height: 45%;
+	}
+	.quick-trade-text-field {
+		margin-top: 5%;
+	}
+	.quick-trade-field,
+	.pro-trade-field {
+		background-color: $bottom-bar--background;
+		width: 100%;
+		height: 100%;
+		border-radius: 50px;
+		text-align: center;
+	}
+	.bottom-text-active-trade-tab {
+		color: $base_top-bar-navigation_text !important;
+		font-weight: bolder;
+	}
+}
+
+.direction_ltr {
+	.sidebar-row {
+		.cell-wrapper {
+			&:not(:last-child) {
+				border-right: 1px solid $colors-border;
+			}
+		}
+	}
+}
+
+.direction_rtl {
+	.sidebar-row {
+		.cell-wrapper {
+			&:not(:last-child) {
+				border-left: 1px solid $colors-border;
+			}
+		}
+	}
+}
+
+.sidebar-bottom-button-trade {
+	background: $bottom-bar--background !important;
+	height: 150%;
+	width: 15% !important;
+	position: absolute;
+	bottom: 10%;
+	border-radius: 100%;
+	.edit-wrapper__container {
+		height: 100%;
+	}
+}
+
+@media screen and (max-height: 600px) {
+	.sidebar-bottom-icon {
+		svg {
+			stroke: none !important;
+		}
+	}
+}
+
+// @media screen and (max-width: 375px) {
+// 	.mobile-trade-wrapper {
+// 		.pro-trade-footer-icon {
+// 			height: 50%;
+// 			margin-top: 20% !important;
+// 		}
+// 		.quick-trade-footer-icon {
+// 			margin-top: 20% !important;
+// 		}
+// 		.quick-trade-field,
+// 		.pro-trade-field {
+// 			width: 65px !important;
+// 			height: 65px !important;
+// 		}
+// 	}
+// 	.sidebar-bottom-button-trade {
+// 		height: 130%;
+// 		width: 20% !important;
+// 	}
+// }
+
+// @media screen and (max-width: 450px) and (min-width: 375px) {
+// 	.mobile-trade-wrapper {
+// 		width: 50%;
+// 		.pro-trade-footer-icon {
+// 			height: 50%;
+// 			margin-top: 18% !important;
+// 		}
+// 		.quick-trade-footer-icon {
+// 			height: 40%;
+// 			margin-top: 20% !important;
+// 		}
+// 		.quick-trade-field,
+// 		.pro-trade-field {
+// 			width: 75px !important;
+// 			height: 75px !important;
+// 		}
+// 	}
+// 	.sidebar-bottom-button-trade {
+// 		height: 135%;
+// 		width: 18% !important;
+// 	}
+// }
+
+// @media screen and (max-width: 550px) and (min-width: 450px) {
+// 	.mobile-trade-wrapper {
+// 		width: 50%;
+// 		.quick-trade-field,
+// 		.pro-trade-field {
+// 			width: 85px !important;
+// 			height: 85px !important;
+// 		}
+// 		.pro-trade-footer-icon {
+// 			height: 40%;
+// 			margin-top: 25% !important;
+// 		}
+// 		.quick-trade-footer-icon {
+// 			height: 35%;
+// 			margin-top: 25% !important;
+// 		}
+// 	}
+// }
+
+// @media screen and (max-width: 768px) {
+// 	.mobile-trade-wrapper {
+// 		.quick-trade-field,
+// 		.pro-trade-field {
+// 			width: 100px;
+// 			height: 100px;
+// 		}
+// 	}
+// }
