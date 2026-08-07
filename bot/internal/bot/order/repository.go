@@ -742,9 +742,9 @@ func (r *OrderRepository) GetTradeHistory(configID int, limit int) ([]Trade, err
             t.maker_fee, t.taker_fee, t.maker_fee_coin, t.taker_fee_coin,
             t.quick, t.maker_id, t.taker_id,
             t.maker_network_id, t.taker_network_id, t.pair_id,
-            t.created_at, t.updated_at, t.quantity, t.direction, t.order_id
+            t.created_at, t.updated_at, t.quantity, t.direction, t.maker_order_id AS order_id
         FROM trades t
-        JOIN orders o ON t.order_id::text = o.order_id OR t.maker_order_id::text = o.order_id
+        JOIN orders o ON t.maker_order_id::text = o.order_id::text
         WHERE o.config_id = $1
         ORDER BY t.timestamp DESC
         LIMIT $2
@@ -815,7 +815,7 @@ func (r *OrderRepository) CalculatePnL(configID int) (map[string]float64, error)
             SUM(CASE WHEN t.side = 'sell' THEN t.quantity ELSE 0 END) as total_sell_qty,
             SUM(t.maker_fee) + SUM(t.taker_fee) as total_fees
         FROM trades t
-        JOIN orders o ON t.order_id::text = o.order_id OR t.maker_order_id::text = o.order_id
+        JOIN orders o ON t.maker_order_id::text = o.order_id::text
         WHERE o.config_id = $1
     `
     
