@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'forkex-market-maker',
-    script: '/opt/forkex/market-maker/index.js',
+    script: '/app/forkex/market-maker/index.js',
     interpreter: '/root/.nvm/versions/node/v23.11.0/bin/node',
     watch: false,
     restart_delay: 5000,

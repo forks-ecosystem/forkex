@@ -4,7 +4,7 @@ services:
     container_name: forkex-ws
     restart: unless-stopped
     env_file:
-      - /opt/forkex/.env
+      - /app/forkex/.env
     ports:
       - "10011:10011"
     networks:

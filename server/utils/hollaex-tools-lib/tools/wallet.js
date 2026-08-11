@@ -301,7 +301,7 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 		};
 
 		// Load hot wallet
-		const walletPath = '/opt/forkex/wallets/lbtc-hot-wallet.json';
+		const walletPath = '/app/forkex/wallets/lbtc-hot-wallet.json';
 		const wallet = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
 		const seed = bip39.mnemonicToSeedSync(wallet.mnemonic);
 		const root = bip32.default(ecc).fromSeed(seed);

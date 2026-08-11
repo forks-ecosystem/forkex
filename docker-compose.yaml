@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      - /opt/db/postgresql:/var/lib/postgresql/data
+      - /srv/forkex/postgresql:/var/lib/postgresql/data
     ports:
       - 5456:5432
     networks:
@@ -26,7 +26,7 @@ services:
     env_file: .env
     command: ["sh", "-c", "redis-server --requirepass ${REDIS_PASSWORD}"]
     volumes:
-      - /opt/db/redis:/data
+      - /srv/forkex/redis:/data
     ports:
       - 6379:6379
     networks:
@@ -49,7 +49,6 @@ services:
       - NETWORK_URL=https://forkex.life
     extra_hosts:
       - host.docker.internal:host-gateway
-    command: node app.js
     ports:
       - 10010:10010
     networks:

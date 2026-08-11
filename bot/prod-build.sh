@@ -5,7 +5,7 @@ set -e
 COMPOSE="docker compose"
 IMAGES=("bot-forkex-bot" )
 
-PROJECT_DIR="/opt/forkex/bot"
+PROJECT_DIR="/app/forkex/bot"
 ################
 
 echo "------------------------------------"

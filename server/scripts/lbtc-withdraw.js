@@ -64,7 +64,7 @@ async function getBlock(height) {
 
 function loadHotWallet() {
     const fs = require('fs');
-    const walletPath = '/opt/forkex/wallets/lbtc-hot-wallet.json';
+    const walletPath = '/app/forkex/wallets/lbtc-hot-wallet.json';
     if (!fs.existsSync(walletPath)) throw new Error('Hot wallet file not found: ' + walletPath);
     const wallet = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
     const seed = bip39.mnemonicToSeedSync(wallet.mnemonic);

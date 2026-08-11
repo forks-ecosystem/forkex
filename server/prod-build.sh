@@ -5,8 +5,8 @@ set -e
 COMPOSE="docker compose"
 IMAGES=("server-forkex-api" "server-forkex-plugins")
 
-PROJECT_DIR="/opt/forkex/server"
-NGINX_DIR="/opt/forkex/web"
+PROJECT_DIR="/app/forkex/server"
+NGINX_DIR="/app/forkex/web"
 ################
 
 echo "------------------------------------"

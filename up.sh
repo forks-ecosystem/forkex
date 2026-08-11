@@ -14,4 +14,4 @@ docker network rm forkex-network 2>/dev/null && echo "Network removed" || echo "
 # Запускаем единый compose
 echo ""
 echo "=== Starting unified ForkEX ==="
-docker compose -f /opt/forkex/docker-compose.yaml up -d
+docker compose -f /app/forkex/docker-compose.yaml up -d

@@ -4,7 +4,7 @@ set -e
 ### CONFIG ###
 COMPOSE="docker compose"
 
-PROJECT_DIR="/opt/forkex/server"
+PROJECT_DIR="/app/forkex/server"
 ################
 
 echo "------------------------------------"
