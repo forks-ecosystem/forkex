@@ -90,18 +90,15 @@ services:
 
   affiliation:
     container_name: forkex-affiliation
-    image: node:18-alpine
+    build:
+      context: .
+      dockerfile: affiliation/Dockerfile
     restart: unless-stopped
-    working_dir: /app
     env_file: .env
-    volumes:
-      - ./server/affiliation-service.js:/app/aindex.js
-      - ./server/node_modules:/app/node_modules
     ports:
       - 10013:10013
     networks:
       - forkex-network
-    command: node aindex.js
 
   # ─── Frontend ──────────────────────────────────────────────
   web:
