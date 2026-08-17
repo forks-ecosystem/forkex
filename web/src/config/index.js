@@ -1,17 +1,19 @@
+const DOMAIN = process.env.REACT_APP_DOMAIN || 'forkex.life';
+
 const PRODUCTION_ENDPOINT =
-	process.env.REACT_APP_SERVER_ENDPOINT || 'https://forkex.life';
+	process.env.REACT_APP_SERVER_ENDPOINT || `https://${DOMAIN}`;
 
 const DEVELOPMENT_ENDPOINT =
 	process.env.REACT_APP_DEVELOPMENT_ENDPOINT ||
-	'https://forkex.life';
+	`https://${DOMAIN}`;
 
 const PRODUCTION_NETWORK_ENDPOINT =
 	process.env.REACT_APP_SERVER_NETWORK_ENDPOINT ||
-	'https://forkex.life';
+	`https://${DOMAIN}`;
 
 const DEVELOPMENT_NETWORK_ENDPOINT =
 	process.env.REACT_APP_DEVELOPMENT_NETWORK_ENDPOINT ||
-	'https://forkex.life';
+	`https://${DOMAIN}`;
 
 const API_PATH = '/v2';
 

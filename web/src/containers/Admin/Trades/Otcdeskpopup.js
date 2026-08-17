@@ -133,7 +133,7 @@ const Otcdeskpopup = ({
 	const [spin, setSpin] = useState(false);
 	const [formulaVariable, setFormulaVariable] = useState();
 	const [marketLink, setMatketLink] = useState(
-		`https://forkex.life/api/v2/ticker?symbol=${
+		`https://${process.env.REACT_APP_DOMAIN || 'forkex.life'}/api/v2/ticker?symbol=${
 			pairs && pairs[0] && pairs[0].name
 		}`
 	);
@@ -259,7 +259,7 @@ const Otcdeskpopup = ({
 		setDisplayUniswap(false);
 		setHedgeSymbol();
 		setMatketLink(
-			`https://forkex.life/api/v2/ticker?symbol=${
+			`https://${process.env.REACT_APP_DOMAIN || 'forkex.life'}/api/v2/ticker?symbol=${
 				pairs && pairs[0] && pairs[0].name
 			}`
 		);
@@ -463,7 +463,7 @@ const Otcdeskpopup = ({
 		setChainlink(false);
 		SetMarketPop(false);
 		setMatketLink(
-			`https://forkex.life/api/v2/ticker?symbol=${
+			`https://${process.env.REACT_APP_DOMAIN || 'forkex.life'}/api/v2/ticker?symbol=${
 				pairs && pairs[0] && pairs[0].name
 			}`
 		);

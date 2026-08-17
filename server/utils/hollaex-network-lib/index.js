@@ -74,7 +74,7 @@ window.UDF_CONFIG = {
 class HollaExNetwork {
 	constructor(
 		opts = {
-			apiUrl: 'https://forkex.life',
+			apiUrl: process.env.PUBLIC_API_URL || 'https://forkex.life',
 			baseUrl: '/v2',
 			apiKey: '40bf98ad7d09cd3252ce9618be0cd74955f4c804',
 			apiSecret: '14e98aa9b741767ccb8ce9693837d96c83451fb39c81f399f1',
@@ -83,7 +83,7 @@ class HollaExNetwork {
 			kit_version: '2.17.0'
 		}
 	) {
-		this.apiUrl = opts.apiUrl || 'https://forkex.life';
+		this.apiUrl = opts.apiUrl || process.env.PUBLIC_API_URL || 'https://forkex.life';
 		this.baseUrl = opts.baseUrl || '/v2';
 		this.apiKey = opts.apiKey;
 		this.apiSecret = opts.apiSecret;
@@ -100,8 +100,9 @@ class HollaExNetwork {
 
 		this.activation_code = opts.activation_code;
 		this.exchange_id = opts.exchange_id;
-		this.wsUrl = 'wss://forkex.life/stream';
-		this.ws = 'ws://forkex.life/stream';
+		const wsBase = (this.apiUrl || '').replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+		this.wsUrl = `${wsBase}/stream`;
+		this.ws = this.wsUrl;
 		this.wsEvents = [];
 		this.wsReconnect = true;
 		this.wsReconnectInterval = 5000;
@@ -3433,8 +3434,9 @@ async generateDashToken() {
 */
     // ВАЖНО: Не подключайтесь к внешнему URL если вы сами WebSocket сервер
     // Проверяем, не пытаемся ли мы подключиться к самим себе
+    const DOMAIN_NAME = process.env.DOMAIN || 'forkex.life';
     const isSelfConnection = this.wsUrl && 
-        (this.wsUrl.includes('forkex.life') || 
+        (this.wsUrl.includes(DOMAIN_NAME) || 
          this.wsUrl.includes('localhost:10011') ||
          this.wsUrl.includes('hollaex-kit-server-stream'));
     

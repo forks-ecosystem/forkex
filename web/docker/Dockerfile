@@ -2,6 +2,8 @@
 FROM node:14.21.1-buster AS build
 ENV NODE_OPTIONS=--max_old_space_size=4096
 ENV GENERATE_SOURCEMAP=false
+ARG REACT_APP_DOMAIN=forkex.life
+ENV REACT_APP_DOMAIN=$REACT_APP_DOMAIN
 WORKDIR /app
 COPY package.json /app/package.json
 RUN npm install -g node-gyp && \

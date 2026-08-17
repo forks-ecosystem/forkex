@@ -30,8 +30,8 @@ export const getAllPluginsData = (availablePlugins = []) => {
 						payments, user balances and more in a secure manner
 					</div>
 					<div>
-						<a className="blue-link" href="https://forkex.life/" target="blank">
-							https://forkex.life/
+						<a className="blue-link" href={`https://${process.env.REACT_APP_DOMAIN || 'forkex.life'}/`} target="blank">
+							{`https://${process.env.REACT_APP_DOMAIN || 'forkex.life'}/`}
 						</a>
 					</div>
 				</div>

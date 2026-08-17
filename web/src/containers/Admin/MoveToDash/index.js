@@ -26,7 +26,7 @@ const MoveToDash = ({ path }) => {
 			/>
 			<div>
 				<a
-					href={`https://dash.forkex.life/${data}`}
+					href={`https://dash.${process.env.REACT_APP_DOMAIN || 'forkex.life'}/${data}`}
 					target="_blank"
 					rel="noopener noreferrer"
 				>

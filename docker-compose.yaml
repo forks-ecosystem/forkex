@@ -42,7 +42,7 @@ services:
       - API_PORT=10010
       - WS_ENABLED=false
       - WS_URL=ws://websocket:10011/stream
-      - NETWORK_URL=https://forkex.life
+      - NETWORK_URL=${NETWORK_URL}
     extra_hosts:
       - host.docker.internal:host-gateway
     ports:
@@ -100,6 +100,8 @@ services:
     build:
       context: ./web
       dockerfile: docker/Dockerfile
+      args:
+        - REACT_APP_DOMAIN=${DOMAIN}
     restart: always
     env_file: .env
     ports:

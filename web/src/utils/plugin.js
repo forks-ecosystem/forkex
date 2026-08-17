@@ -16,9 +16,10 @@ export const mapPluginsTypeToName = (enabledPluginsTypes = []) =>
 		.map((type) => getPluginNameByType(type));
 
 const PLUGIN_PORT = 8080;
+const PLUGIN_DOMAIN = process.env.REACT_APP_DOMAIN || 'forkex.life';
 
 const getPluginJsonUrl = (pluginName, port = PLUGIN_PORT) =>
-	`http://forkex.life:${port}/${pluginName}.json`;
+	`http://${PLUGIN_DOMAIN}:${port}/${pluginName}.json`;
 
 const getLocalBundle = async (pluginName) => {
 	const url = getPluginJsonUrl(pluginName, PLUGIN_PORT);

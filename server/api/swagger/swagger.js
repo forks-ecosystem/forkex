@@ -6,7 +6,7 @@ const definition = {
 		title: 'HollaEx Kit',
 		version: '2.17.0'
 	},
-	host: 'forkex.life',
+	host: process.env.DOMAIN || 'forkex.life',
 	basePath: '/v2',
 	schemes: ['http', 'https'],
 	consumes: ['application/json'],
