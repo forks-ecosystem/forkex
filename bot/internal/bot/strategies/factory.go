@@ -6,7 +6,9 @@ import (
     "github.com/ixbaseANT/bot/internal/models"
 
     conservative_mm "github.com/ixbaseANT/bot/internal/bot/strategies/conservative_mm"
+    counter_liquidity "github.com/ixbaseANT/bot/internal/bot/strategies/counter_liquidity"
     grid_trading "github.com/ixbaseANT/bot/internal/bot/strategies/grid_trading"
+    scalper "github.com/ixbaseANT/bot/internal/bot/strategies/scalper"
 )
 
 type cmmOrderManager struct {
@@ -44,6 +46,10 @@ func (c *cmmOrderManager) UpdateOrderStatus(orderID, status string, executedPric
     return c.inner.UpdateOrderStatus(orderID, status, executedPrice)
 }
 
+func (c *cmmOrderManager) MatchMarketableOrder(orderData order.OrderData, ioc bool) (*order.MatchResult, error) {
+    return c.inner.MatchMarketableOrder(orderData, ioc)
+}
+
 // Factory создает стратегии
 type Factory struct{}
 
@@ -74,6 +80,28 @@ func (f *Factory) NewGridTrading(
     orderManager order.OrderManager,
 ) *grid_trading.GridTrading {
     return grid_trading.NewGridTrading(marketProvider, orderManager)
+}
+
+// NewCounterLiquidity создаёт стратегию встречной ликвидности
+func (f *Factory) NewCounterLiquidity(
+    marketProvider data.MarketDataProvider,
+    orderManager order.OrderManager,
+) *counter_liquidity.CounterLiquidity {
+    return counter_liquidity.NewCounterLiquidity(
+        marketProvider,
+        &cmmOrderManager{inner: orderManager},
+    )
+}
+
+// NewScalper создаёт стратегию скальпера
+func (f *Factory) NewScalper(
+    marketProvider data.MarketDataProvider,
+    orderManager order.OrderManager,
+) *scalper.Scalper {
+    return scalper.NewScalper(
+        marketProvider,
+        &cmmOrderManager{inner: orderManager},
+    )
 }
 /*
 // NewTrendFollowing создает стратегию следования тренду

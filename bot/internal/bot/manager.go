@@ -141,6 +141,20 @@ func (m *BotManager) StartBot(botUserID, configID int) error {
     case "grid_trading":
          strategy = factory.NewGridTrading(marketProv, orderMgr)
 
+    case "counter_liquidity":
+        strategy = factory.NewCounterLiquidity(marketProv, orderMgr)
+        if strategy == nil {
+            return fmt.Errorf("factory returned nil strategy for counter_liquidity")
+        }
+        log.Printf("Strategy created: %T", strategy)
+
+    case "scalper":
+        strategy = factory.NewScalper(marketProv, orderMgr)
+        if strategy == nil {
+            return fmt.Errorf("factory returned nil strategy for scalper")
+        }
+        log.Printf("Strategy created: %T", strategy)
+
     case "trend_following":
         // strategy = factory.NewTrendFollowing(marketProv, orderMgr)
 

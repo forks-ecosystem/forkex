@@ -1,7 +1,8 @@
 // server/utils/price.js
 'use strict';
 
-const { Trade, Orderbook, Pair } = require('../db/models');
+const { Trade, Order, Pair } = require('../db/models');
+const { Op } = require('sequelize');
 
 async function getPrice(symbol) {
     if (!symbol) throw new Error('symbol is required');
@@ -22,22 +23,31 @@ async function getPrice(symbol) {
         };
     }
 
-    // 2 fallback  mid price из orderbook
-    const book = await Orderbook.findOne({
-        include: [{
-            model: Pair,
-            where: { symbol }
-        }],
-        order: [['updated_at', 'DESC']]
-    });
+    // 2 fallback mid price из открытых ордеров
+    const pair = await Pair.findOne({ where: { symbol } });
+    if (pair) {
+        const openOrders = await Order.findAll({
+            where: { pair_id: pair.id, status: 'open' },
+            attributes: ['side', 'price'],
+            raw: true
+        });
 
-    if (book && book.bid_price && book.ask_price) {
-        return {
-            symbol,
-            price: (Number(book.bid_price) + Number(book.ask_price)) / 2,
-            source: 'orderbook',
-            timestamp: book.updated_at
-        };
+        let bestBid = 0;
+        let bestAsk = Infinity;
+        for (const o of openOrders) {
+            const p = parseFloat(o.price);
+            if (o.side === 'buy' && p > bestBid) bestBid = p;
+            if (o.side === 'sell' && p < bestAsk) bestAsk = p;
+        }
+
+        if (bestBid > 0 && bestAsk < Infinity) {
+            return {
+                symbol,
+                price: (bestBid + bestAsk) / 2,
+                source: 'orderbook',
+                timestamp: new Date()
+            };
+        }
     }
 
     // 3 безопасный fallback

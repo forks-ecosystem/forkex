@@ -14,6 +14,8 @@ type OrderManager interface {
     CancelOrder(orderID string) error
     CancelOldOrders(configID int, maxAgeMinutes int) (int, error)
     CancelOldOrdersByStrategy(strategy string, maxAgeMinutes int) (int, error)
+
+    MatchMarketableOrder(orderData OrderData, ioc bool) (*MatchResult, error)
 }
 /*
     // Существующие методы

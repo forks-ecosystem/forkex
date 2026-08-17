@@ -1,7 +1,7 @@
 // server/utils/getTickerUtils.js
 'use strict';
 
-const { Trade, Orderbook, Pair } = require('../db/models');
+const { Trade, Order, Pair } = require('../db/models');
 const { Op } = require('sequelize');
 
 /**
@@ -32,18 +32,20 @@ async function getTickerUtils(symbol) {
             raw: true
         });
 
-        // Бест бид/аск из Orderbook
-        const bid = await Orderbook.findOne({
-            where: { pair_id: pair.id },
-            order: [['bid_price', 'DESC']],
+        // Бест бид/аск из открытых ордеров
+        const openOrders = await Order.findAll({
+            where: { pair_id: pair.id, status: 'open' },
+            attributes: ['side', 'price'],
             raw: true
         });
 
-        const ask = await Orderbook.findOne({
-            where: { pair_id: pair.id },
-            order: [['ask_price', 'ASC']],
-            raw: true
-        });
+        let bestBid = 0;
+        let bestAsk = Infinity;
+        for (const o of openOrders) {
+            const p = parseFloat(o.price);
+            if (o.side === 'buy' && p > bestBid) bestBid = p;
+            if (o.side === 'sell' && p < bestAsk) bestAsk = p;
+        }
 
         // 24ч объем
         const now = new Date();
@@ -87,8 +89,8 @@ async function getTickerUtils(symbol) {
         return {
             symbol,
             last: lastPrice.toFixed(8),
-            bid: bid ? parseFloat(bid.bid_price).toFixed(8) : '0',
-            ask: ask ? parseFloat(ask.ask_price).toFixed(8) : '0',
+            bid: bestBid > 0 ? bestBid.toFixed(8) : '0',
+            ask: bestAsk < Infinity ? bestAsk.toFixed(8) : '0',
             open: openPrice.toFixed(8),
             high: high24h.toFixed(8),
             low: low24h.toFixed(8),

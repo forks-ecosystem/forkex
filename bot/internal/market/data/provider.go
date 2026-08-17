@@ -2,11 +2,11 @@ package data
 
 import (
     "context"
-    "encoding/json"
     "fmt"
     "log"
     "math"
     "math/rand"
+    "sort"
     "strings"
     "sync"
     "time"
@@ -220,43 +220,58 @@ func (p *Provider) getCandlesByPair(ctx context.Context, pairID int, timeframe s
     return candles, nil
 }
 
-// getOrderBookByPair получает стакан
+// getOrderBookByPair получает стакан из реальных открытых ордеров
 func (p *Provider) getOrderBookByPair(ctx context.Context, pair_id int, depth int) (*market.OrderBook, error) {
-//    ctx := context.Background()
-    // Пытаемся получить из БД
-//    pairIDRaw, _ := ctx.Config.Parameters["pair_id"]
-//    pair_id, _ := pairIDRaw.(int)
-    var orderBookJSON []byte
-    err := p.db.QueryRow(ctx, `
-        SELECT bid_price, ask_price
-        FROM orderbooks
-        WHERE pair_id = $1
-        ORDER BY timestamp DESC LIMIT 1
-    `, pair_id).Scan(&orderBookJSON)
-
+    rows, err := p.db.Query(ctx, `
+        SELECT side, price, SUM(size)
+        FROM orders
+        WHERE pair_id = $1 AND status = 'open'
+        GROUP BY side, price
+    `, pair_id)
     if err != nil {
-        // Если нет в БД, генерируем тестовый стакан
-        log.Printf("No order book for %d in DB, generating simulation", pair_id)
-        return p.generateSimulatedOrderBook(pair_id, depth), nil
+        return nil, fmt.Errorf("failed to load order book: %v", err)
+    }
+    defer rows.Close()
+
+    var bids, asks []market.PriceLevel
+    for rows.Next() {
+        var side string
+        var price, qty float64
+        if err := rows.Scan(&side, &price, &qty); err != nil {
+            return nil, fmt.Errorf("failed to scan order book row: %v", err)
+        }
+        level := market.PriceLevel{Price: price, Quantity: qty}
+        if side == "buy" {
+            bids = append(bids, level)
+        } else {
+            asks = append(asks, level)
+        }
+    }
+    if err := rows.Err(); err != nil {
+        return nil, err
     }
 
-    var orderBook market.OrderBook
-    if err := json.Unmarshal(orderBookJSON, &orderBook); err != nil {
-        return nil, fmt.Errorf("failed to unmarshal order book: %v", err)
+    // Лучшие биды первыми (по убыванию), лучшие аски первыми (по возрастанию)
+    sort.Slice(bids, func(i, j int) bool { return bids[i].Price > bids[j].Price })
+    sort.Slice(asks, func(i, j int) bool { return asks[i].Price < asks[j].Price })
+
+    if depth > 0 && len(bids) > depth {
+        bids = bids[:depth]
+    }
+    if depth > 0 && len(asks) > depth {
+        asks = asks[:depth]
     }
 
-    // Ограничиваем глубину
-    if len(orderBook.Bids) > depth {
-        orderBook.Bids = orderBook.Bids[:depth]
-    }
-    if len(orderBook.Asks) > depth {
-        orderBook.Asks = orderBook.Asks[:depth]
+    if len(bids) == 0 && len(asks) == 0 {
+        log.Printf("No open orders for %d in DB, empty order book", pair_id)
     }
 
-    orderBook.Timestamp = time.Now()
-    orderBook.PairID = pair_id
-
-    return &orderBook, nil
+    return &market.OrderBook{
+        PairID:    pair_id,
+        Timestamp: time.Now(),
+        Bids:      bids,
+        Asks:      asks,
+    }, nil
 }
 
 // generateSimulatedMarketData генерирует тестовые рыночные данные

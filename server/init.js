@@ -493,7 +493,6 @@ async function checkActivation(name, url, activation_code, version, constants = 
 
         return {
             id: 1,
-            orderbooks: safe(await Orderbook.findAll()),
             trades: safe(await Trade.findAll()),
             coins: safe(await Coin.findAll()),
             pairs: safe(await Pair.findAll()),

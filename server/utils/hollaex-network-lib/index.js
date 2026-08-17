@@ -42,7 +42,7 @@ const { getUserStatsUtils } = require('../userStats');
 const { checkTransactionUtils } = require('../checkTransaction');
 const { transferAssetUtils } = require('../transferAsset');
 const { getTradesHistoryUtils } = require('../tradesHistory');
-const { getOrderbooksUtils } = require('../getOrderbook');
+const { getOrderbooksUtils } = require('../orderbooks');
 const { getOraclePricesUtils } = require('../getOraclePrices');
 const { getPublicTradesUtils } = require('../publicTrades');
 const { generateDashTokenUtils } = require('../generateDashTokenUtils');
@@ -1354,7 +1354,7 @@ async getChart(from, to, symbol, resolution, opts = { additionalHeaders: null })
             }
         } catch (_) {}
 
-        // Attempt local DB aggregation from trades table
+        // Attempt local DB aggregation from candles table
         try {
             const Sequelize = require('sequelize');
             const { sequelize } = require('../../db/models');
@@ -1365,11 +1365,12 @@ async getChart(from, to, symbol, resolution, opts = { additionalHeaders: null })
             const tf = tfMap[resolution] || '5m';
 
             const candles = await sequelize.query(`
-                SELECT open_time, open, high, low, close, volume
+                SELECT timestamp AS open_time, open, high, low, close, volume
                 FROM candles
-                WHERE pair = :symbol AND timeframe = :tf
-                  AND open_time >= to_timestamp(:from) AND close_time <= to_timestamp(:to)
-                ORDER BY open_time ASC
+                WHERE pair_id = (SELECT id FROM pairs WHERE symbol = :symbol LIMIT 1)
+                  AND timeframe = :tf
+                  AND (timestamp >= :from AND timestamp <= :to)
+                ORDER BY timestamp ASC
             `, {
                 replacements: { symbol, tf, from: Number(from), to: Number(to) },
                 type: QueryTypes.SELECT
@@ -1385,8 +1386,16 @@ async getChart(from, to, symbol, resolution, opts = { additionalHeaders: null })
                     volume: parseFloat(c.volume || 0)
                 }));
             }
+        } catch (_) {}
 
-            // Fallback: aggregate from trades table
+        // Fallback: aggregate from trades table
+        try {
+            const Sequelize = require('sequelize');
+            const { sequelize } = require('../../db/models');
+            const { QueryTypes } = Sequelize;
+
+            const resolutionSeconds = resolution === '1D' ? 86400 : resolution === '1W' ? 604800 : resolution === '1h' || resolution === '60' ? 3600 : resolution === '240' ? 14400 : resolution === '120' ? 7200 : resolution === '30' ? 1800 : resolution === '15' ? 900 : resolution === '5' ? 300 : resolution === '1' ? 60 : 86400;
+
             const trades = await sequelize.query(`
                 SELECT
                     date_trunc('minute', created_at) - interval '1 minute' * (EXTRACT(MINUTE FROM created_at)::int % :tf_min) AS bucket,
@@ -1838,45 +1847,45 @@ async getUdfHistory(from, to, symbol, resolution, opts = {
         return Promise.reject(parameterError('missing parameter', 'cannot be null'));
     }
 
-    // Ключ для кеширования
-    const cacheKey = `history_${symbol}_${resolution}_${from}_${to}`;
-    // Пробуем получить из кеша
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-        console.log('===getUdfHistory: from cache', symbol);
-        return Promise.resolve(JSON.parse(cached));
-    }
     try {
-        // Пробуем API
-        const verb = 'GET';
-        const path = `/udf/history?from=${from}&to=${to}&symbol=${symbol}&resolution=${resolution}`;
-        const headers = generateHeaders(
-            isPlainObject(opts.additionalHeaders) ? { ...this.headers, ...opts.additionalHeaders } : this.headers,
-            this.apiSecret,
-            verb,
-            path,
-            this.apiExpiresAfter
-        );
-        const data = await createRequest(verb, `${this.apiUrl}${path}`, headers);
-        // Сохраняем в кеш (на 5 минут)
-        const cacheData = {
-            ...data,
-            _cachedAt: Date.now()
-        };
-        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-        return data;
-    } catch (error) {
-        console.warn('===getUdfHistory: API failed, using local fallback', error);
-        // Генерируем локальные данные как фолбэк
-        const localData = this.generateFallbackHistory(from, to, symbol, resolution);
-        // Сохраняем локальные данные в кеш
-        localStorage.setItem(cacheKey, JSON.stringify({
-            ...localData,
-            _isFallback: true,
-            _cachedAt: Date.now()
-        }));
-        return localData;
-    }
+        const Sequelize = require('sequelize');
+        const { sequelize } = require('../../db/models');
+        const { QueryTypes } = Sequelize;
+
+        const resolutionSeconds = resolution === '1D' ? 86400 : resolution === '1W' ? 604800 : resolution === '1h' || resolution === '60' ? 3600 : resolution === '240' ? 14400 : resolution === '120' ? 7200 : resolution === '30' ? 1800 : resolution === '15' ? 900 : resolution === '5' ? 300 : resolution === '1' ? 60 : 86400;
+
+        const trades = await sequelize.query(`
+            SELECT
+                date_trunc('minute', created_at) - interval '1 minute' * (EXTRACT(MINUTE FROM created_at)::int % :tf_min) AS bucket,
+                (array_agg(price ORDER BY created_at ASC))[1] AS open,
+                MAX(price) AS high,
+                MIN(price) AS low,
+                (array_agg(price ORDER BY created_at DESC))[1] AS close,
+                SUM(size) AS volume
+            FROM trades
+            WHERE symbol = :symbol
+              AND created_at >= to_timestamp(:from)
+              AND created_at <= to_timestamp(:to)
+            GROUP BY bucket
+            ORDER BY bucket ASC
+        `, {
+            replacements: { symbol, tf_min: resolutionSeconds / 60, from: Number(from), to: Number(to) },
+            type: QueryTypes.SELECT
+        });
+
+        if (trades && trades.length > 0) {
+            const s = 'ok';
+            const t = trades.map(tr => Math.floor(new Date(tr.bucket).getTime() / 1000));
+            const o = trades.map(tr => String(tr.open));
+            const h = trades.map(tr => String(tr.high));
+            const l = trades.map(tr => String(tr.low));
+            const c = trades.map(tr => String(tr.close));
+            const v = trades.map(tr => String(tr.volume || 0));
+            return { s, t, o, h, l, c, v };
+        }
+    } catch (_) {}
+
+    return { s: 'no_data', t: [], o: [], h: [], l: [], c: [], v: [] };
 }
 _getUdfHistory(from, to, symbol, resolution, opts = {
     additionalHeaders: null

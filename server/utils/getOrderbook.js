@@ -56,9 +56,6 @@ const getOrderbookUtils = async (params) => {
     };
 };
 
-const { getOrderbooksUtils } = require('./orderbooks');
-
 module.exports = {
-    getOrderbookUtils,
-    getOrderbooksUtils
+    getOrderbookUtils
 };

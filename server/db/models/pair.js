@@ -103,7 +103,6 @@ module.exports = (sequelize, DataTypes) => {
     underscored: true,
   });
   Pair.associate = function(models) {
-    Pair.hasMany(models.Orderbook, { foreignKey: 'pair_id',      as: 'orderbooks'});
     Pair.belongsTo(models.Coin, {    foreignKey: 'base_coin_id', as: 'base_coin' });
     Pair.belongsTo(models.Coin, {    foreignKey: 'quote_coin_id',as: 'quote_coin'});
   };

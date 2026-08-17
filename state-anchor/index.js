@@ -10,7 +10,7 @@ const NODE_ID = 'node1';
 const CHECK_INTERVAL = 30000;
 const SYNC_TABLES = [
   'users', 'orders', 'trades', 'balances', 'deposits', 'withdrawals',
-  'pairs', 'coins', 'orderbooks', 'transactions', 'sessions',
+  'pairs', 'coins', 'transactions', 'sessions',
   'affiliations', 'announcements', 'audits', 'auto_trade_configs',
   'balance_histories', 'bot_configs', 'brokers', 'logins',
   'market_prices', 'otp_codes', 'p2p_deals', 'p2p_disputes',

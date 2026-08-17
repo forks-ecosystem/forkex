@@ -140,12 +140,14 @@ func (s *ConservativeMarketMaker) Execute(ctx *models.BotContext) error {
     log.Printf("[ConservativeMM] ====== ЦИКЛ МАРКЕТ-МЕЙКЕРА %s =====", symbol)
     log.Printf("[ConservativeMM] Текущая цена: %g", currentPrice)
 
-    // 1. Очищаем старые ордера
-    maxAgeMinutes := int(s.getConfigValue(ctx, "max_order_age_minutes", 30.0))
-    s.cleanupOldOrders(ctx, maxAgeMinutes)
+    // 1. Пересоздаём книгу: отменяем все активные заявки, чтобы не накапливать
+    //    старые уровни (иначе книга перекручивается: bestBid > bestAsk)
+    s.rebuildOrderBook(ctx)
     
-    // 2. ПРОВЕРЯЕМ ИСПОЛНЕНИЕ СО СТАКАНОМ (самое важное!)
-    s.checkExecutionWithOrderBook(ctx, snapshot)
+    // 2. ПРОВЕРЯЕМ ИСПОЛНЕНИЕ СО СТАКАНОМ — ОТКЛЮЧЕНО: MM не исполняет свои
+    //    ордера сам (это создавало фейковые сделки taker_id=0). Реальное
+    //    исполнение ордеров MM идёт только через matching engine.
+    // s.checkExecutionWithOrderBook(ctx, snapshot)
     
     // 3. Размещаем новые ордера с учетом анализа
     s.placeSmartOrders(ctx, snapshot, conditions)
@@ -257,18 +259,23 @@ func (s *ConservativeMarketMaker) logEnhancedStatistics(
 }
 
 // cleanupOldOrders отменяет старые ордера
-func (s *ConservativeMarketMaker) cleanupOldOrders(ctx *models.BotContext, maxAgeMinutes int) {
+// rebuildOrderBook отменяет все активные заявки MM перед пересозданием книги,
+// чтобы старые уровни не накапливались и книга не перекручивалась.
+func (s *ConservativeMarketMaker) rebuildOrderBook(ctx *models.BotContext) {
     activeOrders, err := s.orderManager.GetActiveOrders(ctx.ConfigID)
-    if err == nil && len(activeOrders) > 0 {
-        for _, order := range activeOrders {
-            age := time.Since(order.CreatedAt)
-            if age.Minutes() > float64(maxAgeMinutes) {
-                s.orderManager.RemoveActiveOrder(order.OrderID)
-                log.Printf("[ConservativeMM] Отменен старый ордер %s (возраст: %.0f мин)", 
-                    order.OrderID, age.Minutes())
-            }
+    if err != nil {
+        log.Printf("[ConservativeMM] Ошибка получения активных ордеров: %v", err)
+        return
+    }
+    if len(activeOrders) == 0 {
+        return
+    }
+    for _, order := range activeOrders {
+        if err := s.orderManager.RemoveActiveOrder(order.OrderID); err != nil {
+            log.Printf("[ConservativeMM] Ошибка отмены заявки %s: %v", order.OrderID, err)
         }
     }
+    log.Printf("[ConservativeMM] Пересоздание книги: отменено %d заявок", len(activeOrders))
 }
 // logStatistics логирует статистику по ордерам
 func (s *ConservativeMarketMaker) logStatistics(ctx *models.BotContext) {
