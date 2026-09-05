@@ -122,6 +122,20 @@ func (p *Provider) GetMarketData(ctx context.Context, pair_id int) (*market.Mark
         WHERE pair_id = $1
         ORDER BY updated_at DESC LIMIT 1
     `, pair_id).Scan(&price, &volume24h, &change24h)
+    if err != nil {
+        // Некоторые строки market_prices пишутся только по symbol (без pair_id) —
+        // ищем по символу как запасной вариант.
+        var symbol string
+        _ = p.db.QueryRow(ctx, `SELECT symbol FROM pairs WHERE id = $1`, pair_id).Scan(&symbol)
+        if symbol != "" {
+            err = p.db.QueryRow(ctx, `
+                SELECT price, volume_24h, change_24h
+                FROM market_prices
+                WHERE LOWER(symbol) = $1
+                ORDER BY updated_at DESC LIMIT 1
+            `, strings.ToLower(symbol)).Scan(&price, &volume24h, &change24h)
+        }
+    }
     if err == nil {
         log.Printf("[GetMarketData] FOUND pair_id=%d price=%f", pair_id, price)
         spread := 0.001 // 0.1% — можно сделать конфигурируемым

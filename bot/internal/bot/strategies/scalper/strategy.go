@@ -96,43 +96,95 @@ func (s *Scalper) Execute(ctx *models.BotContext) error {
 		return nil
 	}
 
-	// 4. Получаем стакан
+	// 4. Получаем стакан (реальные открытые ордера)
 	book, err := s.marketProvider.GetOrderBook(symbol, 5)
 	if err != nil {
 		log.Printf("[Scalper] Ошибка получения стакана %s: %v", symbol, err)
 		return nil
 	}
-	if len(book.Bids) == 0 || len(book.Asks) == 0 {
-		log.Printf("[Scalper] Стакан %s пуст — пропускаем цикл", symbol)
-		return nil
+
+	// Внешняя (оракульная) рыночная цена — якорь для размещения.
+	// Если стакан пуст или разошёлся с внешней ценой более чем на 1%,
+	// работаем от внешней цены, а не от статичного стакана.
+	fair, fairErr := s.marketProvider.GetMarketPrice(symbol)
+	bookOK := len(book.Bids) > 0 && len(book.Asks) > 0
+
+	bestBid := 0.0
+	bestAsk := 0.0
+	useFair := false
+
+	if fairErr == nil && fair > 0 {
+		if !bookOK {
+			useFair = true
+			log.Printf("[Scalper] Стакан %s пуст — работаем от внешней цены %.8g", symbol, fair)
+		} else {
+			bookMid := (book.Bids[0].Price + book.Asks[0].Price) / 2
+			if math.Abs(bookMid/fair-1) > 0.01 {
+				useFair = true
+				log.Printf("[Scalper] Стакан %s (mid=%.8g) расходится с внешней ценой %.8g — работаем от неё",
+					symbol, bookMid, fair)
+			}
+		}
+		if useFair {
+			bestBid = fair
+			bestAsk = fair
+		}
 	}
 
-	bestBid := book.Bids[0].Price
-	bestAsk := book.Asks[0].Price
+	if !useFair {
+		if !bookOK {
+			log.Printf("[Scalper] Стакан %s пуст — пропускаем цикл", symbol)
+			return nil
+		}
+		bestBid = book.Bids[0].Price
+		bestAsk = book.Asks[0].Price
+	}
 
 	// 5. Размещаем небольшие пассивные заявки вплотную к лучшим ценам
 	//    (внутри текущего спреда, не пересекая стакан)
 	placed := 0
 	if remaining >= 2 {
-		buyPrice := s.roundPrice(bestBid * (1 + tighten))
-		if buyPrice < bestAsk {
-			s.placeOrder(ctx, pairID, symbol, "buy", buyPrice, orderSize)
-			placed++
-		}
-		sellPrice := s.roundPrice(bestAsk * (1 - tighten))
-		if sellPrice > bestBid {
-			s.placeOrder(ctx, pairID, symbol, "sell", sellPrice, orderSize)
-			placed++
+		if useFair {
+			buyPrice := s.roundPrice(fair * (1 - tighten))
+			sellPrice := s.roundPrice(fair * (1 + tighten))
+			if buyPrice < sellPrice {
+				s.placeOrder(ctx, pairID, symbol, "buy", buyPrice, orderSize)
+				placed++
+				s.placeOrder(ctx, pairID, symbol, "sell", sellPrice, orderSize)
+				placed++
+			}
+		} else {
+			buyPrice := s.roundPrice(bestBid * (1 + tighten))
+			if buyPrice < bestAsk {
+				s.placeOrder(ctx, pairID, symbol, "buy", buyPrice, orderSize)
+				placed++
+			}
+			sellPrice := s.roundPrice(bestAsk * (1 - tighten))
+			if sellPrice > bestBid {
+				s.placeOrder(ctx, pairID, symbol, "sell", sellPrice, orderSize)
+				placed++
+			}
 		}
 	} else if remaining == 1 {
-		side := "buy"
-		price := s.roundPrice(bestBid * (1 + tighten))
-		if s.rand.Float64() < 0.5 {
-			side = "sell"
-			price = s.roundPrice(bestAsk * (1 - tighten))
+		if useFair {
+			side := "buy"
+			price := s.roundPrice(fair * (1 - tighten))
+			if s.rand.Float64() < 0.5 {
+				side = "sell"
+				price = s.roundPrice(fair * (1 + tighten))
+			}
+			s.placeOrder(ctx, pairID, symbol, side, price, orderSize)
+			placed++
+		} else {
+			side := "buy"
+			price := s.roundPrice(bestBid * (1 + tighten))
+			if s.rand.Float64() < 0.5 {
+				side = "sell"
+				price = s.roundPrice(bestAsk * (1 - tighten))
+			}
+			s.placeOrder(ctx, pairID, symbol, side, price, orderSize)
+			placed++
 		}
-		s.placeOrder(ctx, pairID, symbol, side, price, orderSize)
-		placed++
 	}
 
 	if placed > 0 {

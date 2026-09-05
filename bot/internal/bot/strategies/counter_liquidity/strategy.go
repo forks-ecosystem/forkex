@@ -75,13 +75,42 @@ func (s *CounterLiquidity) Execute(ctx *models.BotContext) error {
 		log.Printf("[CounterLiquidity] Ошибка получения стакана %s: %v", symbol, err)
 		return nil
 	}
-	if len(book.Bids) == 0 || len(book.Asks) == 0 {
-		log.Printf("[CounterLiquidity] Стакан %s пуст — пропускаем цикл", symbol)
-		return nil
+
+	// Внешняя (оракульная) рыночная цена — якорь. Если стакан пуст или
+	// разошёлся с внешней ценой более чем на 1% — работаем от неё.
+	fair, fairErr := s.marketProvider.GetMarketPrice(symbol)
+	bookOK := len(book.Bids) > 0 && len(book.Asks) > 0
+
+	bestBid := 0.0
+	bestAsk := 0.0
+	useFair := false
+
+	if fairErr == nil && fair > 0 {
+		if !bookOK {
+			useFair = true
+			log.Printf("[CounterLiquidity] Стакан %s пуст — работаем от внешней цены %.8g", symbol, fair)
+		} else {
+			bookMid := (book.Bids[0].Price + book.Asks[0].Price) / 2
+			if math.Abs(bookMid/fair-1) > 0.01 {
+				useFair = true
+				log.Printf("[CounterLiquidity] Стакан %s (mid=%.8g) расходится с внешней ценой %.8g — работаем от неё",
+					symbol, bookMid, fair)
+			}
+		}
+		if useFair {
+			bestBid = fair
+			bestAsk = fair
+		}
 	}
 
-	bestBid := book.Bids[0].Price
-	bestAsk := book.Asks[0].Price
+	if !useFair {
+		if !bookOK {
+			log.Printf("[CounterLiquidity] Стакан %s пуст — пропускаем цикл", symbol)
+			return nil
+		}
+		bestBid = book.Bids[0].Price
+		bestAsk = book.Asks[0].Price
+	}
 
 	// 3. Вероятностное гейтирование попытки сделки
 	now := time.Now()

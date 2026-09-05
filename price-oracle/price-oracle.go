@@ -116,12 +116,19 @@ type Pair struct {
 // ------------------ DB ФУНКЦИИ ------------------
 
 func SetMarketPrice(symbol string, price float64, source string) error {
+    var pairID *int64
+    var pid int64
+    if err := db.QueryRow(`SELECT id FROM pairs WHERE symbol = $1`, symbol).Scan(&pid); err == nil {
+        pairID = &pid
+    }
+
     _, err := db.Exec(`
-        INSERT INTO market_prices(symbol, price, source, updated_at)
-        VALUES ($1, $2, $3, NOW())
+        INSERT INTO market_prices(symbol, price, source, updated_at, pair_id)
+        VALUES ($1, $2, $3, NOW(), $4)
         ON CONFLICT (symbol)
-        DO UPDATE SET price = $2, source = $3, updated_at = NOW()
-    `, symbol, price, source)
+        DO UPDATE SET price = EXCLUDED.price, source = EXCLUDED.source,
+                      updated_at = NOW(), pair_id = EXCLUDED.pair_id
+    `, symbol, price, source, pairID)
 
     if err != nil {
         log.Printf("DB error updating market_prices for %s: %v", symbol, err)
@@ -178,7 +185,7 @@ func LoadPairs() ([]Pair, error) {
             price_max
         FROM pairs
         WHERE active = true
-        AND price_source IN ('binance', 'derived', 'kucoin', 'static')
+        AND price_source IN ('binance', 'derived', 'kucoin', 'static', 'oracle')
         ORDER BY symbol
     `)
     if err != nil {
@@ -270,6 +277,47 @@ func GetKuCoinPrice(symbol string) (float64, error) {
     return strconv.ParseFloat(data.Data.Price, 64)
 }
 
+// ссылка на основной оракул HollaEx:
+// https://api.hollaex.com/v2/oracle/prices?assets=xht&quote=usdt&amount=1
+func GetOraclePrice(symbol string) (float64, error) {
+    parts := strings.Split(symbol, "-")
+    if len(parts) != 2 {
+        return 0, fmt.Errorf("invalid symbol: %s", symbol)
+    }
+    asset := strings.ToLower(parts[0])
+    quote := strings.ToLower(parts[1])
+    url := fmt.Sprintf(
+        "https://api.hollaex.com/v2/oracle/prices?assets=%s&quote=%s&amount=1",
+        asset, quote,
+    )
+
+    client := &http.Client{Timeout: 10 * time.Second}
+    resp, err := client.Get(url)
+    if err != nil {
+        return 0, err
+    }
+    defer resp.Body.Close()
+
+    var data map[string]interface{}
+    if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+        return 0, err
+    }
+
+    raw, ok := data[asset]
+    if !ok {
+        return 0, fmt.Errorf("oracle response has no price for %s", asset)
+    }
+
+    switch v := raw.(type) {
+    case float64:
+        return v, nil
+    case string:
+        return strconv.ParseFloat(v, 64)
+    default:
+        return 0, fmt.Errorf("unexpected oracle value type for %s", asset)
+    }
+}
+
 // ------------------ ОРАКУЛЬНЫЕ ЦИКЛЫ ------------------
 
 func AnchorLoop(ctx context.Context, p Pair) {
@@ -302,6 +350,9 @@ func AnchorLoop(ctx context.Context, p Pair) {
             case "kucoin":
                 price, err = GetKuCoinPrice(p.Symbol)
                 source = "kucoin"
+            case "oracle":
+                price, err = GetOraclePrice(p.Symbol)
+                source = "oracle"
             default:
                 continue
             }
@@ -414,7 +465,7 @@ func ReloadPairs() {
         loopsMu.Unlock()
 
         switch p.PriceSource {
-        case "binance", "kucoin":
+        case "binance", "kucoin", "oracle":
             go AnchorLoop(ctx, p)
             log.Printf("Started anchor loop for %s", p.Symbol)
         case "derived":
