@@ -17,7 +17,7 @@ data:
   EMAILS_TIMEZONE: 'UTC'
   KIT_VERSION: ''
   KYC_EMAIL: ''
-  LOGO_IMAGE: 'https://forkex.xyz/img/logo_st.png'
+  LOGO_IMAGE: 'https://hollaex.forkex.life/img/logo_st.png'
   LOG_LEVEL: 'verbose'
   NETWORK: 'mainnet'
   NETWORK_URL: 'https://forkex.life'
