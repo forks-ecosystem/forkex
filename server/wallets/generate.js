@@ -46,7 +46,8 @@ async function generateWallet(user_id, crypto,  network) {
 			Object.assign(result, wallet, { mnemonic });
 			break;
 		}
-		case 'sol': {
+		case 'sol':
+		case 'trump': {
 			const solWallet = require('./Solana-wallet');
 			const wallet = solWallet.generate(mnemonic);
 			Object.assign(result, wallet, { mnemonic });
