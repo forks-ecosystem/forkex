@@ -117,6 +117,7 @@ class UnifiedWSServer {
                 userData = jwt.verify(cleanToken, JWT_SECRET);
                 userId = userData.sub?.id || userData.user_id;
                 isAuthenticated = true;
+                this.pendingToken = cleanToken;
                 loggerWs.verbose(`Authenticated: user ${userId} (${userData.sub?.email || userData.email})`);
             }
         } catch (err) {
@@ -132,8 +133,12 @@ class UnifiedWSServer {
             channels: new Set(),
             authenticated: isAuthenticated,
             isAlive: true,
+            token: this.pendingToken || null,
+            orderPollInterval: null,
+            lastOrdersSignature: null,
             type: req.headers['user-agent'] ? 'browser' : 'service'
         });
+        this.pendingToken = null;
         ws.clientId = clientId;
         // Heartbeat
         ws.on('pong', () => {
@@ -242,6 +247,7 @@ class UnifiedWSServer {
             const userData = jwt.verify(token, JWT_SECRET);
             client.userId = userData.sub?.id || userData.user_id;
             client.userData = userData;
+            client.token = token;
             client.authenticated = true;
             loggerWs.info(`Client ${clientId} authenticated as user ${client.userId}`);
             client.ws.send(JSON.stringify({
@@ -316,6 +322,11 @@ class UnifiedWSServer {
         this.channels.get(channel).add(clientId);
         
         loggerWs.verbose(`Client ${clientId} subscribed to ${channel}`);
+
+        // Для приватных/личных каналов ордеров - запускаем опрос открытых ордеров
+        if (channel === 'order' || (channel.startsWith('order:') && client.userId && channel === `order:${client.userId}`)) {
+            this.startOrderPolling(clientId);
+        }
     }
     
     subscribeToChannels(clientId, channels) {
@@ -425,6 +436,12 @@ class UnifiedWSServer {
         const client = this.clients.get(clientId);
         if (!client) return;
     
+        // Останавливаем опрос ордеров
+        if (client.orderPollInterval) {
+            clearInterval(client.orderPollInterval);
+            client.orderPollInterval = null;
+        }
+    
         // Удаляем из каналов
         client.channels.forEach(channel => {
             const subs = this.channels.get(channel);
@@ -501,6 +518,51 @@ class UnifiedWSServer {
         fetchAndBroadcast();
         setInterval(fetchAndBroadcast, POLL_INTERVAL);
         loggerWs.info(`Data polling started every ${POLL_INTERVAL}ms from ${API_URL}`);
+    }
+
+    startOrderPolling(clientId) {
+        const client = this.clients.get(clientId);
+        if (!client) return;
+        if (client.orderPollInterval) return;
+        this.pollUserOrders(clientId);
+        client.orderPollInterval = setInterval(() => this.pollUserOrders(clientId), 4000);
+    }
+
+    async pollUserOrders(clientId) {
+        const client = this.clients.get(clientId);
+        if (!client || client.ws.readyState !== WebSocket.OPEN || !client.authenticated || !client.userId) {
+            if (client && client.orderPollInterval) {
+                clearInterval(client.orderPollInterval);
+                client.orderPollInterval = null;
+            }
+            return;
+        }
+        if (!(client.channels.has('order') || client.channels.has(`order:${client.userId}`))) {
+            return;
+        }
+        const token = client.token;
+        if (!token) return;
+
+        try {
+            const API_URL = process.env.PUBLIC_API_URL || process.env.NETWORK_URL || 'http://forkex-api:10010';
+            const res = await axios.get(`${API_URL}/v2/orders?open=true&limit=50`, {
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 3000
+            });
+            const orders = (res.data && res.data.data) || [];
+            const signature = JSON.stringify(orders);
+            if (signature === client.lastOrdersSignature) return;
+            client.lastOrdersSignature = signature;
+            this.safeSend(clientId, JSON.stringify({
+                topic: 'order',
+                symbol: null,
+                action: 'partial',
+                data: orders,
+                time: Date.now()
+            }));
+        } catch (err) {
+            loggerWs.verbose(`Order poll error for user ${client.userId}:`, err.message);
+        }
     }
     
     async sendInitialTrades(clientId) {
