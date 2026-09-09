@@ -829,6 +829,7 @@ INSERT INTO orders (
   accepted,
   accepted_amount,
   symbol,
+  execution_strategy,
   created_at,
   updated_at
 ) VALUES (
@@ -838,6 +839,7 @@ INSERT INTO orders (
   false,
   0,
   $6,
+  'manual',
   NOW(),
   NOW()
 )
