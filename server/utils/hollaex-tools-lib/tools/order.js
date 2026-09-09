@@ -77,7 +77,7 @@ const createUserOrderByKitId = (userKitId, symbol, side, size, type, price = 0, 
 					discount: user.discount
 				}
 			);
-			return getNodeLib().createOrder(user.network_id, symbol, side, size, type, type === 'market' ? 0 : price, feeData, opts);
+			return getNodeLib().createOrder(user.id, symbol, side, size, type, type === 'market' ? 0 : price, feeData, opts);
 		});
 };
 
@@ -682,7 +682,7 @@ const createUserOrderByEmail = (email, symbol, side, size, type, price = 0, opts
 				}
 			);
 
-			return getNodeLib().createOrder(user.network_id, symbol, side, size, type, price, feeData, opts);
+			return getNodeLib().createOrder(user.id, symbol, side, size, type, price, feeData, opts);
 		});
 };
 
@@ -709,7 +709,7 @@ const createUserOrderByNetworkId = (networkId, symbol, side, size, type, price =
 				}
 			);
 
-			return getNodeLib().createOrder(user.network_id, symbol, side, size, type, price, feeData, opts);
+			return getNodeLib().createOrder(user.id, symbol, side, size, type, price, feeData, opts);
 		});
 };
 
@@ -723,16 +723,12 @@ const createOrderNetwork = (networkId, symbol, side, size, type, price, feeData 
 const getUserOrderByKitId = async (userKitId, orderId, opts = {
 	additionalHeaders: null
 }) => {
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
+	const user = await getUserByKitId(userKitId);
+	if (!user) {
 		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
 	}
 
-	return getNodeLib().getOrder(idDictionary[userKitId], orderId, opts);
+	return getNodeLib().getOrder(user.id, orderId, opts);
 };
 
 const getUserOrderByEmail = (email, orderId, opts = {
@@ -745,7 +741,7 @@ const getUserOrderByEmail = (email, orderId, opts = {
 			} else if (!user.network_id) {
 				throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
 			}
-			return getNodeLib().getOrder(user.network_id, orderId, opts);
+			return getNodeLib().getOrder(user.id, orderId, opts);
 		});
 };
 
@@ -761,15 +757,7 @@ const getUserOrderByNetworkId = (networkId, orderId, opts = {
 const cancelUserOrderByKitId = async (userKitId, orderId, opts = {
 	additionalHeaders: null
 }) => {
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
-		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-	}
-	return getNodeLib().cancelOrder(idDictionary[userKitId], orderId, opts);
+	return getNodeLib().cancelOrder(userKitId, orderId, opts);
 };
 
 const cancelUserOrderByEmail = (email, orderId, opts = {
@@ -782,7 +770,7 @@ const cancelUserOrderByEmail = (email, orderId, opts = {
 			} else if (!user.network_id) {
 				throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
 			}
-			return getNodeLib().cancelOrder(user.network_id, orderId, opts);
+			return getNodeLib().cancelOrder(user.id, orderId, opts);
 		});
 };
 
@@ -820,7 +808,7 @@ const getAllExchangeOrders = (symbol, side, status, open, limit, page, orderBy, 
 				const networkIds = orders.data.map((order) => order.created_by);
 				const idDictionary = await mapNetworkIdToKitId(networkIds);
 				for (let order of orders.data) {
-					const user_kit_id = idDictionary[order.created_by];
+					const user_kit_id = idDictionary[order.created_by] || order.created_by;
 					order.network_id = order.created_by;
 					order.created_by = user_kit_id;
 					if (order.User) order.User.id = user_kit_id;
@@ -836,15 +824,7 @@ const getAllUserOrdersByKitId = async (userKitId, symbol, side, status, open, li
 	if (symbol && !subscribedToPair(symbol)) {
 		return reject(new Error(INVALID_SYMBOL(symbol)));
 	}
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
-		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-	}
-	return getNodeLib().getUserOrders(idDictionary[userKitId], {
+	return getNodeLib().getUserOrders(userKitId, {
 		symbol,
 		side,
 		status,
@@ -863,7 +843,7 @@ const getAllUserOrdersByKitId = async (userKitId, symbol, side, status, open, li
 				const networkIds = orders.data.map((order) => order.created_by);
 				const idDictionary = await mapNetworkIdToKitId(networkIds);
 				for (let order of orders.data) {
-					const user_kit_id = idDictionary[order.created_by];
+					const user_kit_id = idDictionary[order.created_by] || order.created_by;
 					order.network_id = order.created_by;
 					order.created_by = user_kit_id;
 					if (order.User) order.User.id = user_kit_id;
@@ -892,10 +872,8 @@ const getAllUserOrdersByEmail = (email, symbol, side, status, open, limit, page,
 		.then((user) => {
 			if (!user) {
 				throw new Error(USER_NOT_FOUND);
-			} else if (!user.network_id) {
-				throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
 			}
-			return getNodeLib().getUserOrders(user.network_id, {
+			return getNodeLib().getUserOrders(user.id, {
 				symbol,
 				side,
 				status,
@@ -911,7 +889,7 @@ const getAllUserOrdersByEmail = (email, symbol, side, status, open, limit, page,
 		});
 };
 
-const getAllUserOrdersByNetworkId = (networkId, symbol, side, status, open, limit, page, orderBy, order, startDate, endDate, opts = {
+const getAllUserOrdersByNetworkId = async (networkId, symbol, side, status, open, limit, page, orderBy, order, startDate, endDate, opts = {
 	additionalHeaders: null
 }) => {
 	if (!networkId) {
@@ -920,7 +898,11 @@ const getAllUserOrdersByNetworkId = (networkId, symbol, side, status, open, limi
 	if (symbol && !subscribedToPair(symbol)) {
 		return reject(new Error(INVALID_SYMBOL(symbol)));
 	}
-	return getNodeLib().getUserOrders(networkId, {
+	const user = await getUserByNetworkId(networkId);
+	if (!user) {
+		throw new Error(USER_NOT_FOUND);
+	}
+	return getNodeLib().getUserOrders(user.id, {
 		symbol,
 		side,
 		status,
@@ -937,20 +919,10 @@ const getAllUserOrdersByNetworkId = (networkId, symbol, side, status, open, limi
 
 // Match a user's order (by Kit user id) on the network
 const matchUserOrderByKitId = async (userKitId, orderId, symbol, size = null, opts = { additionalHeaders: null }) => {
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
-		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-	}
-
 	const user = await getUserByKitId(userKitId);
 	if (!user) {
 		throw new Error(USER_NOT_FOUND);
 	}
-
 
 	const feeData = generateOrderFeeData(
 		user.verification_level,
@@ -958,7 +930,7 @@ const matchUserOrderByKitId = async (userKitId, orderId, symbol, size = null, op
 		{ discount: user.discount }
 	);
 
-	return getNodeLib().matchOrder(idDictionary[userKitId], orderId, feeData.fee_structure, size, opts);
+	return getNodeLib().matchOrder(user.id, orderId, feeData.fee_structure, size, opts);
 };
 
 // Match a user's order (by Network id) on the network
@@ -991,15 +963,7 @@ const cancelAllUserOrdersByKitId = async (userKitId, symbol, opts = {
 	if (!symbol || !subscribedToPair(symbol)) {
 		return reject(new Error(INVALID_SYMBOL(symbol)));
 	}
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
-		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-	}
-	return getNodeLib().cancelAllOrders(idDictionary[userKitId], { symbol, ...opts });
+	return getNodeLib().cancelAllOrders(userKitId, { symbol, ...opts });
 };
 
 const cancelAllUserOrdersByEmail = (email, symbol, opts = {
@@ -1012,14 +976,12 @@ const cancelAllUserOrdersByEmail = (email, symbol, opts = {
 		.then((user) => {
 			if (!user) {
 				throw new Error(USER_NOT_FOUND);
-			} else if (!user.network_id) {
-				throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
 			}
-			return getNodeLib().cancelAllOrders(user.network_id, { symbol, ...opts });
+			return getNodeLib().cancelAllOrders(user.id, { symbol, ...opts });
 		});
 };
 
-const cancelAllUserOrdersByNetworkId = (networkId, symbol, opts = {
+const cancelAllUserOrdersByNetworkId = async (networkId, symbol, opts = {
 	additionalHeaders: null
 }) => {
 	if (!networkId) {
@@ -1028,7 +990,11 @@ const cancelAllUserOrdersByNetworkId = (networkId, symbol, opts = {
 	if (symbol && !subscribedToPair(symbol)) {
 		return reject(new Error(INVALID_SYMBOL(symbol)));
 	}
-	return getNodeLib().cancelAllOrders(networkId, { symbol, ...opts });
+	const user = await getUserByNetworkId(networkId);
+	if (!user) {
+		throw new Error(USER_NOT_FOUND);
+	}
+	return getNodeLib().cancelAllOrders(user.id, { symbol, ...opts });
 };
 
 const getAllTradesNetwork = (symbol, limit, page, orderBy, order, startDate, endDate, format, opts = { additionalHeaders: null }) => {

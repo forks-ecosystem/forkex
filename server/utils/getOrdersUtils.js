@@ -1,15 +1,6 @@
 'use strict';
 
-const { Order, Pair, User } = require('../db/models');
-
-const resolveUserId = async (userId) => {
-  if (!userId) return userId;
-  const numId = Number(userId);
-  if (isNaN(numId)) return userId;
-  const user = await User.findOne({ where: { id: numId }, attributes: ['id', 'network_id'], raw: true });
-  if (!user) return userId;
-  return user.network_id != null ? user.network_id : userId;
-};
+const { Order, Pair } = require('../db/models');
 
 const getOrdersUtils = async (params) => {
   const {
@@ -22,7 +13,7 @@ const getOrdersUtils = async (params) => {
   } = params.query;
 
   const where = {};
-  if (user_id) where.user_id = await resolveUserId(user_id);
+  if (user_id) where.user_id = user_id;
   if (open === 'true') where.status = 'open';
 
   try {
