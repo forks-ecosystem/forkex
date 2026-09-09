@@ -18,7 +18,8 @@ INSERT INTO coins (name, symbol, fullname, display_name, icon_id, status, active
 ('Tether',       'usdt', 'Tether',         'Tether USDT',    'USDT_ICON', true, true, true, true, true, 1,         1,          1000000,    0.000001,   0.000001,   'USDT', 'blockchain', 'eth',  'ERC20',    'Tether',   false, true, NOW(), NOW()),
 ('HollaEx Token','xht',  'HollaEx Token',  'HollaEx Token',  'XHT_ICON',  true, true, true, true, true, 0.5,       0.5,        100000,     0.000001,   0.000001,   'XHT',  'blockchain', 'eth',  'ERC20',    'HollaEx',  false, true, NOW(), NOW()),
 ('Gor',          'gor',  'Gor',            'Gor',            'GOR_ICON',  true, true, true, true, true, 0.01,      0.01,       100000,     0.00000001, 0.00000001, 'GOR',  'blockchain', 'gor',  NULL,       'HollaEx',  false, true, NOW(), NOW()),
-('Kaspa',        'kas',  'Kaspa',          'Kaspa',          'KAS_ICON',  true, true, true, true, true, 0.1,       0.1,        1000000,    0.00000001, 0.00000001, 'KAS',  'blockchain', 'kas',  NULL,       'Kaspa',    false, true, NOW(), NOW());
+('Kaspa',        'kas',  'Kaspa',          'Kaspa',          'KAS_ICON',  true, true, true, true, true, 0.1,       0.1,        1000000,    0.00000001, 0.00000001, 'KAS',  'blockchain', 'kas',  NULL,       'Kaspa',    false, true, NOW(), NOW()),
+('Official Trump','trump','Official Trump', 'Official Trump', 'TRUMP_ICON', true, true, true, true, true, 0.01,      0.01,       10000,      0.00000001, 0.00000001, 'TRUMP', 'blockchain', 'sol',  'SPL',      'Trump',    false, true, NOW(), NOW());
 
 -- 3. ВСТАВЛЯЕМ PAIRS (после COINS, т.к. нужны id)
 INSERT INTO pairs (base_coin_id, quote_coin_id, pair_base, pair_2, symbol, name, active, status, taker_fees, maker_fees, min_size, max_size, increment_size, increment_price, is_public, circuit_breaker, created_at, updated_at) VALUES
@@ -29,6 +30,7 @@ INSERT INTO pairs (base_coin_id, quote_coin_id, pair_base, pair_2, symbol, name,
 ((SELECT id FROM coins WHERE symbol='xht'),  (SELECT id FROM coins WHERE symbol='usdt'), 'xht',  'usdt', 'xht-usdt',  'XHT/USDT',  true, 'active', 0.001, 0.0005, 0.5,      100000,    0.5,      0.01,     true, true, NOW(), NOW()),
 ((SELECT id FROM coins WHERE symbol='gor'),  (SELECT id FROM coins WHERE symbol='usdt'), 'gor',  'usdt', 'gor-usdt',  'GOR/USDT',  true, 'active', 0.001, 0.0005, 0.01,     100000,    0.01,     0.01,     true, true, NOW(), NOW()),
 ((SELECT id FROM coins WHERE symbol='kas'),  (SELECT id FROM coins WHERE symbol='usdt'), 'kas',  'usdt', 'kas-usdt',  'KAS/USDT',  true, 'active', 0.001, 0.0005, 0.1,      1000000,   0.1,      0.01,     true, true, NOW(), NOW()),
+((SELECT id FROM coins WHERE symbol='trump'),(SELECT id FROM coins WHERE symbol='usdt'), 'trump','usdt', 'trump-usdt','TRUMP/USDT', true, 'active', 0.001, 0.0005, 0.01,     10000,     0.01,     0.01,     true, true, NOW(), NOW()),
 ((SELECT id FROM coins WHERE symbol='btc'),  (SELECT id FROM coins WHERE symbol='eth'),  'btc',  'eth',  'btc-eth',   'BTC/ETH',   true, 'active', 0.001, 0.0005, 0.0001,   100,       0.0001,   0.01,     true, true, NOW(), NOW()),
 ((SELECT id FROM coins WHERE symbol='eth'),  (SELECT id FROM coins WHERE symbol='btc'),  'eth',  'btc',  'eth-btc',   'ETH/BTC',   true, 'active', 0.001, 0.0005, 0.001,    1000,      0.001,    0.00001,  true, true, NOW(), NOW());
 
@@ -44,6 +46,7 @@ INSERT INTO balances (user_id, currency, balance, available, locked, updated_at)
 (58, 'xht',  100,     100,     0, NOW()),
 (58, 'gor',  200,     200,     0, NOW()),
 (58, 'kas',  1000,    1000,    0, NOW()),
+(58, 'trump', 5000,   5000,    0, NOW()),
 (57, 'btc',  0.2,     0.2,     0, NOW()),
 (57, 'eth',  2.0,     2.0,     0, NOW()),
 (57, 'usdt', 5000,    5000,    0, NOW()),
@@ -52,6 +55,7 @@ INSERT INTO balances (user_id, currency, balance, available, locked, updated_at)
 (57, 'xht',  50,      50,      0, NOW()),
 (57, 'gor',  100,     100,     0, NOW()),
 (57, 'kas',  500,     500,     0, NOW()),
+(57, 'trump', 2500,   2500,    0, NOW()),
 (9,  'btc',  0.1,     0.1,     0, NOW()),
 (9,  'eth',  1.0,     1.0,     0, NOW()),
 (9,  'usdt', 2000,    2000,    0, NOW()),
@@ -59,7 +63,8 @@ INSERT INTO balances (user_id, currency, balance, available, locked, updated_at)
 (9,  'trx',  1000,    1000,    0, NOW()),
 (9,  'xht',  25,      25,      0, NOW()),
 (9,  'gor',  50,      50,      0, NOW()),
-(9,  'kas',  200,     200,     0, NOW());
+(9,  'kas',  200,     200,     0, NOW()),
+(9,  'trump', 1250,   1250,    0, NOW());
 
 -- 5. USER ADDRESS BOOKS
 DELETE FROM user_address_books WHERE user_id IN (58, 57, 9);

@@ -186,7 +186,6 @@ async getTrades(
     if (!userId) {
         return reject(parameterError('userId', 'cannot be null'));
     }
-    console.log('=== getTrades user_id: ', userId);
     const queryParams = { user_id: userId };
     if (isString(opts.symbol)) queryParams.symbol = opts.symbol;
     if (isNumber(opts.limit)) queryParams.limit = opts.limit;
@@ -230,7 +229,6 @@ async getUserTrades(
     if (!userId) { return reject(parameterError('userId', 'cannot be null')); }
     // Создаем объект для параметров запроса
     const queryParams = { user_id: userId };
-    console.log('=== getUserTrades user_id: ', userId);
     // Добавляем параметры, если они переданы
     if (isString(opts.symbol)) queryParams.symbol = opts.symbol;
     if (isNumber(opts.limit)) queryParams.limit = opts.limit;
@@ -316,7 +314,6 @@ async getExchangeWallets(
         additionalHeaders: null
     }
 ) {
-    console.log('=== getExchangeWakkets user_id: ', this.exchange_id);
     const queryParams = {};
     if (opts.userId) queryParams.user_id = opts.userId;
     if (isString(opts.currency)) queryParams.currency = opts.currency;
@@ -583,7 +580,6 @@ async getUserWithdrawals(
     }
     // Создаем объект параметров запроса
     const queryParams = { user_id: userId };
-    console.log('=== getUserWithdrawals user_id: ', userId);
     if (isString(opts.currency)) queryParams.currency = opts.currency;
     if (isBoolean(opts.status)) queryParams.status = opts.status;
     if (isBoolean(opts.dismissed)) queryParams.dismissed = opts.dismissed;
@@ -622,7 +618,6 @@ async getUserWithdrawals(
 	    if (!userId) return reject(parameterError('userId'));
 	    // For self-hosted: use local DB, userId is kit user_id
 	    const user_id = userId;
-	    console.log('=1= getUserBalance user_id: ', user_id);
 	    const mockReq = { query: { user_id } };
 	    const mockRes = {
 	        status: () => ({ json: d => d }),
@@ -667,7 +662,6 @@ async getUserWithdrawals(
     if (opts.userId) queryParams.user_id = opts.userId;
     if (opts.currency) queryParams.currency = opts.currency;
     if (isString(opts.format)) queryParams.format = opts.format;
-    console.log('=== getBalances user_id: ', opts.userId);
     try {
         const mockReq = { query: queryParams };
         const mockRes = {
@@ -696,7 +690,6 @@ async createBrokerTrade(
     feeStructure,
     opts = { additionalHeaders: null }
 ) {
-    console.log('=== getBrokerTrade : ok');
     // ✅ Валидация (оставляем как есть)
     if (!symbol) return reject(parameterError('symbol'));
     if (!side) return reject(parameterError('side'));
@@ -752,7 +745,6 @@ async getOrder(
     if (!orderId) {
         return reject(parameterError('orderId', 'cannot be null'));
     }
-    console.log('=== getOrder user_id: ', userId);
     try {
         const mockReq = {
             query: {
@@ -943,7 +935,6 @@ async getOrders(
         additionalHeaders: null
     }
 ) {
-    console.log('=== getOrders: ');
     const queryParams = {};
     if (isNumber(opts.limit)) queryParams.limit = opts.limit;
     if (isNumber(opts.page)) queryParams.page = opts.page;
@@ -1799,7 +1790,6 @@ _getMiniCharts(assets, opts = {
 async getUdfConfig(opts = {
     additionalHeaders: null
 }) {
-    console.log('===getUdfConfig: using local data');
     // Локальные данные для TradingView
     const localConfig = {
         "supports_search": true,
@@ -1891,7 +1881,6 @@ async getUdfHistory(from, to, symbol, resolution, opts = {
 _getUdfHistory(from, to, symbol, resolution, opts = {
     additionalHeaders: null
 }) {
-    console.log('===getUdfHistory: local mode for', symbol);
     // Простые данные чтобы график отображался
     const interval = 300; // 5 минут в секундах
     const count = 10;
@@ -1959,8 +1948,6 @@ getUdfSymbols(symbol, opts = {
     if (!symbol) {
         return Promise.reject(parameterError('symbol', 'cannot be null'));
     }
-    
-    console.log('===getUdfSymbols: returning local config for', symbol);
     
     // Минимальный набор данных для работы TradingView
     return Promise.resolve({
@@ -2056,14 +2043,11 @@ getFallbackTicker(symbol) {
 /**
  */
     async getTickers(opts = {}) {
-        console.log('NetworkLib.getTickers called with options:', opts);
         try {
             // forceRefresh можно передать в опциях
             const { getTickersUtils } = require('../getTickersUtils');
             const forceRefresh = opts.forceRefresh || false;
             const tickers = await getTickersUtils(forceRefresh);
-            // Логируем результат
-            console.log(`2.Returning ${Object.keys(tickers).length} tickers`);
             return tickers;
         } catch (error) {
             console.error('Error in NetworkLib.getTickers:', error.message);

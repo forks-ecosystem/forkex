@@ -38,6 +38,8 @@ export const getNetworkNameByKey = (network) => {
 				return 'Polygon';
 			case 'sol':
 				return 'Solana';
+			case 'trump':
+				return 'Solana';
 			case 'xlm':
 				return 'Stellar';
 			case 'ftm':

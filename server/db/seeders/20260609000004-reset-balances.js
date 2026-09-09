@@ -17,6 +17,7 @@ module.exports = {
 			{ user_id: 58, currency: 'xht', balance: 100, available: 100, locked: 0 },
 			{ user_id: 58, currency: 'gor', balance: 200, available: 200, locked: 0 },
 			{ user_id: 58, currency: 'kas', balance: 1000, available: 1000, locked: 0 },
+			{ user_id: 58, currency: 'trump', balance: 5000, available: 5000, locked: 0 },
 
 			{ user_id: 57, currency: 'btc', balance: 0.2, available: 0.2, locked: 0 },
 			{ user_id: 57, currency: 'eth', balance: 2.0, available: 2.0, locked: 0 },
@@ -26,6 +27,7 @@ module.exports = {
 			{ user_id: 57, currency: 'xht', balance: 50, available: 50, locked: 0 },
 			{ user_id: 57, currency: 'gor', balance: 100, available: 100, locked: 0 },
 			{ user_id: 57, currency: 'kas', balance: 500, available: 500, locked: 0 },
+			{ user_id: 57, currency: 'trump', balance: 2500, available: 2500, locked: 0 },
 
 			{ user_id: 9, currency: 'btc', balance: 0.1, available: 0.1, locked: 0 },
 			{ user_id: 9, currency: 'eth', balance: 1.0, available: 1.0, locked: 0 },
@@ -35,6 +37,7 @@ module.exports = {
 			{ user_id: 9, currency: 'xht', balance: 25, available: 25, locked: 0 },
 			{ user_id: 9, currency: 'gor', balance: 50, available: 50, locked: 0 },
 			{ user_id: 9, currency: 'kas', balance: 200, available: 200, locked: 0 },
+			{ user_id: 9, currency: 'trump', balance: 1250, available: 1250, locked: 0 },
 		];
 
 		for (const balance of balances) {

@@ -189,6 +189,9 @@ export const EXPLORERS_ENDPOINT = (currency) => {
 		case 'sol':
 			endpoint = 'https://solscan.io/tx/';
 			break;
+		case 'trump':
+			endpoint = 'https://solscan.io/tx/';
+			break;
 		case 'ton':
 			endpoint = 'https://tonscan.org/tx/';
 			break;

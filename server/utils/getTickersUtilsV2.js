@@ -22,7 +22,8 @@ const BASE_PRICES = {
     'rub': { price: 90, volatility: 0.005 },
     'bnb': { price: 600, volatility: 0.025 },
     'sol': { price: 200, volatility: 0.04 },
-    'ada': { price: 0.45, volatility: 0.035 }
+    'ada': { price: 0.45, volatility: 0.035 },
+    'trump': { price: 2.26, volatility: 0.035 }
 };
 
 /**

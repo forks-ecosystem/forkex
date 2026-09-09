@@ -242,6 +242,7 @@ function generateRealisticMockTicker(symbol, pair) {
 		'gor': 0.001,
 		'kas': 0.10,
 		'xht': 0.55,
+		'trump': 2.26,
 		'usdt': 1,
 		'usd': 1,
 		'eur': 0.92,

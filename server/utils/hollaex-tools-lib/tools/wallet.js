@@ -524,7 +524,7 @@ const calculateWithdrawalMax = async (user_id, currency, selectedNetwork) => {
 	}
 
 	const user = await getUserByKitId(user_id);
-	const balance = await getNodeLib().getUserBalance(user.network_id);
+	const balance = await getNodeLib().getUserBalance(user.id);
 	let amount = balance[`${currency}_available`];
 
 	if (amount === 0) return { amount };
@@ -659,8 +659,8 @@ const validateWithdrawal = async (user, address, amount, currency, network = nul
 
 	let { fee, fee_coin } = getWithdrawalFee(currency, network, amount, user.verification_level);
 
-	// For LBTC: use kit user_id directly (no network node)
-	const balanceUserId = currency === 'lbtc' ? user.id : user.network_id;
+	// Balance table stores kit user_id (not network_id)
+	const balanceUserId = user.id;
 	const balance = await getNodeLib().getUserBalance(balanceUserId);
 
 	if (coinMarkup?.fee_markups?.[network]?.withdrawal?.value && coinMarkup?.fee_markups?.[network]?.withdrawal?.symbol === fee_coin && network !== 'fiat' && network !== 'email') {
@@ -885,16 +885,8 @@ const transferAssetByNetworkIds = (senderId, receiverId, currency, amount, descr
 const getUserBalanceByKitId = async (userKitId, opts = {
 	additionalHeaders: null
 }) => {
-	// check mapKitIdToNetworkId
-	const idDictionary = await mapKitIdToNetworkId([userKitId]);
-
-	if (!has(idDictionary, userKitId)) {
-		throw new Error(USER_NOT_FOUND);
-	} else if (!idDictionary[userKitId]) {
-		throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-	}
-
-	return getNodeLib().getUserBalance(idDictionary[userKitId], opts)
+	// Balance table stores kit user_id (not network_id)
+	return getNodeLib().getUserBalance(userKitId, opts)
 		.then((data) => {
 			return {
 				user_id: userKitId,
@@ -903,13 +895,19 @@ const getUserBalanceByKitId = async (userKitId, opts = {
 		});
 };
 
-const getUserBalanceByNetworkId = (networkId, opts = {
+const getUserBalanceByNetworkId = async (networkId, opts = {
 	additionalHeaders: null
 }) => {
 	if (!networkId) {
 		return reject(new Error(USER_NOT_REGISTERED_ON_NETWORK));
 	}
-	return getNodeLib().getUserBalance(networkId, opts);
+	// Local Balance table stores kit ids, so resolve network_id -> kit id
+	const idDictionary = await mapNetworkIdToKitId([networkId]);
+	const kitId = idDictionary[networkId];
+	if (!kitId) {
+		return reject(new Error(USER_NOT_FOUND));
+	}
+	return getNodeLib().getUserBalance(kitId, opts);
 };
 
 const getKitBalance = (opts = {

@@ -1,9 +1,19 @@
 // utils/userOrders.js
 'use strict';
 
-const { Order, Pair } = require('../db/models');
+const { Order, Pair, User } = require('../db/models');
 const { Op } = require('sequelize');
-const { isBoolean } = require('lodash'); 
+const { isBoolean } = require('lodash');
+
+const resolveUserId = async (userId) => {
+    if (!userId) return userId;
+    const numId = Number(userId);
+    if (isNaN(numId)) return userId;
+    const user = await User.findOne({ where: { id: numId }, attributes: ['id', 'network_id'], raw: true });
+    if (!user) return userId;
+    return user.network_id != null ? user.network_id : userId;
+};
+
 const getUserOrdersUtils = async (params) => {
     const {
         user_id,
@@ -22,7 +32,7 @@ const getUserOrdersUtils = async (params) => {
     if (!user_id) {
         throw new Error('user_id is required');
     }
-    const where = { user_id };
+    const where = { user_id: await resolveUserId(user_id) };
     if (symbol) where.symbol = symbol;
     if (side) where.side = side;
     if (status) where.status = status;
