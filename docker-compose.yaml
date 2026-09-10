@@ -96,7 +96,7 @@ services:
   # ─── Frontend ──────────────────────────────────────────────
   web:
     container_name: forkex-web
-    image: forkex-web:v3
+    image: forkex-web:v4
     build:
       context: ./web
       dockerfile: docker/Dockerfile
