@@ -507,87 +507,71 @@ export const generateTradeHeaders = (
 			},
 		},
 		{
-			stringId: 'SIZE',
-			label: STRINGS['SIZE'],
-			key: 'size',
-			exportToCsv: ({ size = 0, ...data }) => {
-				if (pairs[data.symbol]) {
-					const { pair_base_display, increment_size } = pairs[data.symbol];
+		stringId: 'SIZE',
+		label: STRINGS['SIZE'],
+		key: 'size',
+		exportToCsv: ({ size = 0, ...data }) => {
+			if (pairs[data.symbol]) {
+				const { increment_size } = pairs[data.symbol];
 
-					return STRINGS.formatString(
-						CURRENCY_PRICE_FORMAT,
-						formatToCurrency(size, increment_size),
-						pair_base_display
-					).join('');
-				} else {
-					return size;
-				}
-			},
-			renderCell: ({ size = 0, ...data }, key, index) => {
-				if (pairs[data.symbol]) {
-					const { pair_base_display, increment_size } = pairs[data.symbol];
-
-					return (
-						<td key={index}>
-							{!isLoading ? (
-								STRINGS.formatString(
-									CURRENCY_PRICE_FORMAT,
-									formatToCurrency(size, increment_size),
-									pair_base_display
-								)
-							) : (
-								<Loading index={index} />
-							)}
-						</td>
-					);
-				} else {
-					return (
-						<td key={index}>{!isLoading ? size : <Loading index={index} />}</td>
-					);
-				}
-			},
+				return formatToCurrency(size, increment_size);
+			} else {
+				return size;
+			}
 		},
-		{
-			stringId: 'PRICE',
-			label: STRINGS['PRICE'],
-			key: 'price',
-			exportToCsv: ({ price = 0, size = 0, quick, symbol }) => {
-				if (pairs[symbol]) {
-					const { pair_2_display, increment_price } = pairs[symbol];
+		renderCell: ({ size = 0, ...data }, key, index) => {
+			if (pairs[data.symbol]) {
+				const { increment_size } = pairs[data.symbol];
 
-					return STRINGS.formatString(
-						CURRENCY_PRICE_FORMAT,
-						formatToCurrency(
-							calculatePrice(quick, price, size),
-							increment_price
-						),
-						pair_2_display
-					).join('');
-				} else {
-					return calculatePrice(quick, price, size);
-				}
-			},
-			renderCell: ({ price = 0, size = 0, quick, symbol }, key, index) => {
-				if (pairs[symbol]) {
-					const { pair_2_display, increment_price } = pairs[symbol];
-					return (
-						<td key={index}>
-							{!isLoading ? (
-								<span>
-									{price
-										? STRINGS.formatString(
-												CURRENCY_PRICE_FORMAT,
-												formatToCurrency(
-													calculatePrice(quick, price, size),
-													increment_price
-												),
-												pair_2_display
-										  )
-										: ''}
-								</span>
-							) : (
-								<Loading index={index} />
-							)}
+				return (
+					<td key={index}>
+						{!isLoading ? (
+							formatToCurrency(size, increment_size)
+						) : (
+							<Loading index={index} />
+						)}
+					</td>
+				);
+			} else {
+				return (
+					<td key={index}>{!isLoading ? size : <Loading index={index} />}</td>
+				);
+			}
+		},
+	},
+		{
+		stringId: 'PRICE',
+		label: STRINGS['PRICE'],
+		key: 'price',
+		exportToCsv: ({ price = 0, size = 0, quick, symbol }) => {
+			if (pairs[symbol]) {
+				const { increment_price } = pairs[symbol];
+
+				return formatToCurrency(
+					calculatePrice(quick, price, size),
+					increment_price
+				);
+			} else {
+				return calculatePrice(quick, price, size);
+			}
+		},
+		renderCell: ({ price = 0, size = 0, quick, symbol }, key, index) => {
+			if (pairs[symbol]) {
+				const { increment_price } = pairs[symbol];
+				return (
+					<td key={index}>
+						{!isLoading ? (
+							<span>
+								{price
+									? formatToCurrency(
+											calculatePrice(quick, price, size),
+											increment_price
+									  )
+									: ''}
+							</span>
+						) : (
+							<Loading index={index} />
+						)}
 						</td>
 					);
 				} else {
@@ -604,43 +588,35 @@ export const generateTradeHeaders = (
 			},
 		},
 		{
-			stringId: 'AMOUNT',
-			label: STRINGS['AMOUNT'],
-			key: 'amount',
-			exportToCsv: ({ price = 0, size = 0, quick, symbol }) => {
-				if (pairs[symbol]) {
-					const { pair_2_display, increment_price } = pairs[symbol];
+		stringId: 'AMOUNT',
+		label: STRINGS['AMOUNT'],
+		key: 'amount',
+		exportToCsv: ({ price = 0, size = 0, quick, symbol }) => {
+			if (pairs[symbol]) {
+				const { increment_price } = pairs[symbol];
 
-					return STRINGS.formatString(
-						CURRENCY_PRICE_FORMAT,
-						formatToCurrency(
-							calculateAmount(quick, price, size),
-							increment_price
-						),
-						pair_2_display
-					).join('');
-				} else {
-					return calculateAmount(quick, price, size);
-				}
-			},
-			renderCell: ({ price = 0, size = 0, quick, symbol }, key, index) => {
-				if (pairs[symbol]) {
-					const { pair_2_display, increment_price } = pairs[symbol];
+				return formatToCurrency(
+					calculateAmount(quick, price, size),
+					increment_price
+				);
+			} else {
+				return calculateAmount(quick, price, size);
+			}
+		},
+		renderCell: ({ price = 0, size = 0, quick, symbol }, key, index) => {
+			if (pairs[symbol]) {
+				const { increment_price } = pairs[symbol];
 
-					return (
-						<td key={index}>
-							{!isLoading ? (
-								STRINGS.formatString(
-									CURRENCY_PRICE_FORMAT,
-									formatToCurrency(
-										calculateAmount(quick, price, size),
-										increment_price
-									),
-									pair_2_display
-								)
-							) : (
-								<Loading index={index} />
-							)}
+				return (
+					<td key={index}>
+						{!isLoading ? (
+							formatToCurrency(
+								calculateAmount(quick, price, size),
+								increment_price
+							)
+						) : (
+							<Loading index={index} />
+						)}
 						</td>
 					);
 				} else {
