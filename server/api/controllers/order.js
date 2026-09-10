@@ -393,7 +393,7 @@ const cancelUserOrder = (req, res) => {
 	const user_id = req.auth.sub.id;
 	const order_id = req.swagger.params.order_id.value;
 
-	if (!order_id || typeof order_id !== 'string' || !isUUID(order_id)) {
+	if (!order_id || typeof order_id !== 'string' || (!isUUID(order_id) && !/^\d+$/.test(order_id))) {
 		loggerUser.error(
 			req.uuid,
 			'controllers/order/cancelUserOrder invalid order_id',

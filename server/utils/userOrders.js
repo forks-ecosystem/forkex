@@ -47,7 +47,7 @@ const getUserOrdersUtils = async (params) => {
         }]
     });
     const data = orders.map(o => ({
-        id: String(o.id),
+        id: o.order_id || String(o.id),
         order_id: o.order_id,
         symbol: o.Pair?.symbol ?? o.symbol ?? '',
         side: o.side,

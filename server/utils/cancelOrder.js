@@ -1,6 +1,7 @@
 // utils/cancelOrder.js
 'use strict';
 
+const { Op } = require('sequelize');
 const { Order } = require('../db/models');
 
 const cancelOrderUtils = async (params) => {
@@ -10,10 +11,17 @@ const cancelOrderUtils = async (params) => {
         throw new Error('user_id and order_id are required');
     }
 
+    const whereOr = [];
+    if (/^\d+$/.test(order_id)) {
+        whereOr.push({ id: Number(order_id) });
+    } else {
+        whereOr.push({ order_id });
+    }
+
     const order = await Order.findOne({
         where: {
-            order_id,
-            user_id
+            user_id,
+            [Op.or]: whereOr
         }
     });
 
@@ -29,7 +37,7 @@ const cancelOrderUtils = async (params) => {
     await order.save();
 
     return {
-        id: String(order.id),
+        id: order.order_id || String(order.id),
         order_id: order.order_id,
         symbol: order.symbol,
         side: order.side,
