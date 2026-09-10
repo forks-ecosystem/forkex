@@ -848,15 +848,204 @@ RETURNING order_id;
 
 
     const insertValues = [userId, pairId, side, price, size, symbol];
+
+    return await db.transaction(async (t) => {
+
     const result = await db.query(
         insertQuery,
-        { bind: insertValues, type: db.QueryTypes.INSERT }
+        { bind: insertValues, type: db.QueryTypes.INSERT, transaction: t }
     );
+    const newOrderId = result[0][0].order_id;
+
+    // --- Matching engine ---
+    let remSize = Number(size);
+    const fillPrice = Number(price);
+    const takerUserId = userId;
+    const takerOrderId = newOrderId;
+    const takerSide = side;
+    const execTrades = [];
+
+    // Parse pair to get base/quote currencies: "lbtc-usdt" → base="lbtc", quote="usdt"
+    const pairParts = symbol.split('-');
+    const baseCurrency = pairParts[0];
+    const quoteCurrency = pairParts[1];
+
+    // Get fee rates from pairs table
+    const pairRow = await db.query(
+        'SELECT maker_fees, taker_fees FROM pairs WHERE id = $1',
+        { bind: [pairId], type: db.QueryTypes.SELECT, transaction: t }
+    );
+    const makerFeeRate = pairRow.length > 0 ? Number(pairRow[0].maker_fees) : 0.001;
+    const takerFeeRate = pairRow.length > 0 ? Number(pairRow[0].taker_fees) : 0.001;
+
+    if (remSize > 0) {
+        // Find crossing orders: opposite side, price crossing
+        let crossingQuery;
+        if (takerSide === 'buy') {
+            // Buy order crosses with sells at or below buy price
+            crossingQuery = `
+                SELECT order_id, user_id, price, size
+                FROM orders
+                WHERE pair_id = $1 AND side = 'sell' AND status = 'open' AND price <= $2
+                ORDER BY price ASC, created_at ASC
+            `;
+        } else {
+            // Sell order crosses with buys at or above sell price
+            crossingQuery = `
+                SELECT order_id, user_id, price, size
+                FROM orders
+                WHERE pair_id = $1 AND side = 'buy' AND status = 'open' AND price >= $2
+                ORDER BY price DESC, created_at ASC
+            `;
+        }
+
+        const crossingOrders = await db.query(
+            crossingQuery,
+            { bind: [pairId, fillPrice], type: db.QueryTypes.SELECT, transaction: t }
+        );
+
+        for (const maker of crossingOrders) {
+            if (remSize <= 0) break;
+
+            const makerSize = Number(maker.size);
+            if (makerSize <= 0) continue;
+
+            const fillSize = Math.min(remSize, makerSize);
+            const tradePrice = Number(maker.price); // price-time priority: maker's price
+            const quantity = fillSize * tradePrice;  // quote amount
+
+            // Fees
+            const makerFee = quantity * makerFeeRate;
+            const takerFee = quantity * takerFeeRate;
+
+            // Create trade row
+            const takerDirection = takerSide === 'buy' ? 'buy' : 'sell';
+            const makerDirection = takerSide === 'buy' ? 'sell' : 'buy';
+
+            await db.query(
+                `INSERT INTO trades (
+                    side, direction, symbol, size, price, quantity,
+                    maker_order_id, taker_order_id,
+                    maker_fee, taker_fee,
+                    maker_fee_coin, taker_fee_coin,
+                    maker_id, taker_id,
+                    pair_id, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    $7, $8,
+                    $9, $10,
+                    $11, $12,
+                    $13, $14,
+                    $15, NOW(), NOW()
+                )`,
+                {
+                    bind: [
+                        takerDirection, takerDirection, symbol, fillSize, tradePrice, quantity,
+                        maker.order_id, takerOrderId,
+                        makerFee, takerFee,
+                        baseCurrency, baseCurrency,
+                        maker.user_id, takerUserId,
+                        pairId
+                    ],
+                    type: db.QueryTypes.INSERT, transaction: t
+                }
+            );
+
+            // Update maker order: reduce size, close if fully filled
+            const makerRemaining = makerSize - fillSize;
+            if (makerRemaining <= 0) {
+                await db.query(
+                    `UPDATE orders SET status = 'closed', size = 0, updated_at = NOW() WHERE order_id = $1`,
+                    { bind: [maker.order_id], type: db.QueryTypes.UPDATE }
+                );
+            } else {
+                await db.query(
+                    `UPDATE orders SET size = $2, updated_at = NOW() WHERE order_id = $1`,
+                    { bind: [maker.order_id, makerRemaining], type: db.QueryTypes.UPDATE }
+                );
+            }
+
+            // Update balances:
+            // Taker is buyer, maker is seller (or vice versa)
+            if (takerSide === 'buy') {
+                // Taker (buyer) gets baseCurrency, pays quoteCurrency
+                await db.query(
+                    `UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [fillSize, takerUserId, baseCurrency], type: db.QueryTypes.UPDATE }
+                );
+                await db.query(
+                    `UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [quantity + takerFee, takerUserId, quoteCurrency], type: db.QueryTypes.UPDATE }
+                );
+                // Maker (seller) gets quoteCurrency, pays baseCurrency
+                await db.query(
+                    `UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [quantity - makerFee, maker.user_id, quoteCurrency], type: db.QueryTypes.UPDATE }
+                );
+                await db.query(
+                    `UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [fillSize, maker.user_id, baseCurrency], type: db.QueryTypes.UPDATE }
+                );
+            } else {
+                // Taker (seller) gets quoteCurrency, pays baseCurrency
+                await db.query(
+                    `UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [quantity - takerFee, takerUserId, quoteCurrency], type: db.QueryTypes.UPDATE }
+                );
+                await db.query(
+                    `UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [fillSize, takerUserId, baseCurrency], type: db.QueryTypes.UPDATE }
+                );
+                // Maker (buyer) gets baseCurrency, pays quoteCurrency
+                await db.query(
+                    `UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [fillSize, maker.user_id, baseCurrency], type: db.QueryTypes.UPDATE }
+                );
+                await db.query(
+                    `UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+                     WHERE user_id = $2 AND currency = $3`,
+                    { bind: [quantity + makerFee, maker.user_id, quoteCurrency], type: db.QueryTypes.UPDATE }
+                );
+            }
+
+            remSize -= fillSize;
+            execTrades.push({
+                price: tradePrice,
+                size: fillSize,
+                maker_order_id: maker.order_id,
+                taker_order_id: takerOrderId
+            });
+        }
+    }
+
+    // Update taker order: reduce size or close
+    if (remSize <= 0) {
+        await db.query(
+            `UPDATE orders SET status = 'closed', size = 0, updated_at = NOW() WHERE order_id = $1`,
+            { bind: [takerOrderId], type: db.QueryTypes.UPDATE, transaction: t }
+        );
+    } else if (remSize < Number(size)) {
+        await db.query(
+            `UPDATE orders SET size = $2, updated_at = NOW() WHERE order_id = $1`,
+            { bind: [takerOrderId, remSize], type: db.QueryTypes.UPDATE, transaction: t }
+        );
+    }
+
     return {
-        order_id: result[0][0].order_id,
-        status: 'open',
-        message: 'Order created'
+        order_id: takerOrderId,
+        status: remSize <= 0 ? 'closed' : 'open',
+        filled: Number(size) - remSize,
+        trades: execTrades,
+        message: execTrades.length > 0 ? `Order matched, ${execTrades.length} trade(s) executed` : 'Order placed'
     };
+    });
 }
 
 	/**
