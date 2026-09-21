@@ -8,11 +8,14 @@ const path = require('path');
 
 const RPC_PORT = 19556;
 const RPC_HOST = '127.0.0.1';
-const CLI_PATH = '/root/LegacyCore/legacycoin-cli';
+const CLI_PATH = '/home/coin/go/bin/legacycoin-cli';
+
+const RPC_USER = 'coin';
+const RPC_PASSWORD = 'coin';
 
 const DB_CONFIG = {
     host: '127.0.0.1',
-    port: 5454,
+    port: 5434,
     user: 'admin',
     password: 'root',
     database: 'hollaex',

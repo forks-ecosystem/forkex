@@ -9,6 +9,7 @@ const RPC_HOST = '127.0.0.1';
 const RPC_PORT = 19556;
 const CURRENCY = 'lbtc';
 const MIN_CONFIRMATIONS = 3;
+const RPC_DELAY_MS = 350;
 
 // Watched addresses -> user_id mapping
 const WATCHED = {
@@ -18,6 +19,28 @@ const WATCHED = {
 
 let lastCheckedHeight = 0;
 const pendingDeposits = new Map(); // txid -> deposit info
+
+const STATE_FILE = __dirname + '/lbtc-monitor-state.json';
+
+function loadState() {
+    try {
+        lastCheckedHeight = JSON.parse(require('fs').readFileSync(STATE_FILE, 'utf8')).lastCheckedHeight || 0;
+    } catch (e) {
+        lastCheckedHeight = 0;
+    }
+}
+
+function saveState() {
+    try {
+        require('fs').writeFileSync(STATE_FILE, JSON.stringify({ lastCheckedHeight }, null, 2));
+    } catch (e) {}
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const sleepMs = async () => {
+    await sleep(RPC_DELAY_MS);
+};
 
 function rpcCall(method, params = []) {
     return new Promise((resolve, reject) => {
@@ -49,20 +72,20 @@ function rpcCall(method, params = []) {
     });
 }
 
-async function getBlockHash(height) {
-    return rpcCall('getblockhash', [height]);
-}
-
-async function getBlock(hash) {
-    return rpcCall('getblock', [hash]);
-}
-
-async function getRawTransaction(txid) {
-    return rpcCall('getrawtransaction', [txid, true]);
-}
-
-async function getBlockCount() {
-    return rpcCall('getblockcount');
+// rpcCallE retries politely on HTTP 429 (too many requests) so the monitor
+// stays within the node rate limit even when the node is busy.
+async function rpcCallE(method, params = []) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) await sleep(RPC_DELAY_MS * attempt);
+        try {
+            const v = await rpcCall(method, params);
+            return v;
+        } catch (e) {
+            const is429 = /too many requests/i.test(String(e.message));
+            if (!is429) throw e;
+        }
+    }
+    throw new Error(`${method} still rate-limited after retries`);
 }
 
 function findAddressInVout(vout) {
@@ -135,8 +158,8 @@ function skipTx(buf, offset) {
 }
 
 async function scanBlock(height) {
-    const hash = await getBlockHash(height);
-    const block = await getBlock(hash);
+    const hash = await rpcCallE('getblockhash', [height]);
+    const block = await rpcCallE('getblock', [hash]);
     const txids = Array.isArray(block.tx) ? block.tx : [];
     if (txids.length === 0 && block.hex) {
         try { txids.push(...parseBlockTxids(block.hex)); } catch (e) {}
@@ -144,7 +167,7 @@ async function scanBlock(height) {
     const deposits = [];
     for (const txid of txids) {
         try {
-            const tx = await getRawTransaction(txid);
+            const tx = await rpcCallE('getrawtransaction', [txid, true]);
             const matches = findAddressInVout(tx.vout || []);
             for (const m of matches) {
                 deposits.push({
@@ -158,19 +181,36 @@ async function scanBlock(height) {
                 });
             }
         } catch (e) {}
+        await sleepMs();
     }
     return deposits;
 }
 
 async function checkDeposits() {
     try {
-        const tip = await getBlockCount();
-        if (lastCheckedHeight === 0) lastCheckedHeight = tip - 100;
+        const tip = await rpcCallE('getblockcount');
+        if (lastCheckedHeight === 0) {
+            lastCheckedHeight = Math.max(0, tip - 100);
+            saveState();
+        }
         const newDeposits = [];
         for (let h = lastCheckedHeight + 1; h <= tip; h++) {
-            newDeposits.push(...await scanBlock(h));
+            try {
+                const found = await scanBlock(h);
+                newDeposits.push(...found);
+            } catch (e) {
+                console.error(`[${new Date().toISOString()}] block ${h} scan error: ${e.message}; will retry next cycle`);
+                saveState();
+                throw new Error(`scan stopped at block ${h}`);
+            }
+            lastCheckedHeight = h;
+            if (h % 25 === 0) {
+                saveState();
+                console.log(`[${new Date().toISOString()}] scanned →${h}/${tip}`);
+            }
+            await sleepMs();
         }
-        lastCheckedHeight = tip;
+        saveState();
 
         for (const dep of newDeposits) {
             const confirmed = dep.confirmations >= MIN_CONFIRMATIONS;
@@ -186,7 +226,7 @@ async function checkDeposits() {
         if (pendingDeposits.size > 0) {
             for (const [txid, dep] of pendingDeposits) {
                 try {
-                    const tx = await getRawTransaction(txid);
+                    const tx = await rpcCallE('getrawtransaction', [txid, true]);
                     const confs = tx.confirmations || 0;
                     if (confs >= MIN_CONFIRMATIONS) {
                         console.log(`[${new Date().toISOString()}] CONFIRMED: ${dep.value} LBTC | tx: ${txid} | confs: ${confs}`);
@@ -194,6 +234,7 @@ async function checkDeposits() {
                         await creditBalance({ ...dep, confirmations: confs });
                     }
                 } catch (e) {}
+                await sleepMs();
             }
         }
 
@@ -207,7 +248,7 @@ async function checkDeposits() {
 
 async function creditBalance(deposit) {
     const { Client } = require('pg');
-    const client = new Client({ host: '127.0.0.1', port: 5454, database: 'hollaex', user: 'admin', password: 'root' });
+    const client = new Client({ host: '172.18.0.4', port: 5432, database: 'hollaex', user: 'admin', password: 'root' });
     try {
         await client.connect();
         const existing = await client.query('SELECT id FROM transactions WHERE tx_hash = $1', [deposit.txid]);
@@ -216,22 +257,35 @@ async function creditBalance(deposit) {
         const value = Number(deposit.value);
         const userId = Number(deposit.userId);
 
-        await client.query(
+        const bal = await client.query(
             'UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW() WHERE user_id = $2::int AND currency = $3',
             [value, userId, CURRENCY]
         );
+        if (bal.rowCount === 0) {
+            await client.query(
+                `INSERT INTO balances (user_id, currency, balance, available, locked, updated_at)
+                 VALUES ($1::int, $2, $3::numeric, $3::numeric, 0, NOW())`,
+                [userId, CURRENCY, value]
+            );
+        }
         await client.query(
             `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
              VALUES ($1::int, 'deposit', $2::numeric, $3, 'completed', 0, '', 'On-chain LBTC deposit', NULL, $4, $5, 'lbtc', '{}', NOW(), NOW())`,
             [userId, value, CURRENCY, deposit.txid, deposit.address]
         );
-        // Sync user_wallets
-        await client.query(
-            `INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, created_at, updated_at)
-             VALUES ($1::int, $2, $3::numeric, $3::numeric, $4, 'lbtc', true, NOW(), NOW())
-             ON CONFLICT (user_id, currency) DO UPDATE SET balance = (SELECT balance FROM balances WHERE user_id = $1::int AND currency = $2), available = (SELECT available FROM balances WHERE user_id = $1::int AND currency = $2), address = $4, updated_at = NOW()`,
-            [userId, CURRENCY, value, deposit.address]
+        // Sync user_wallets: update first, insert only if no row exists
+        const uw = await client.query(
+            `UPDATE user_wallets SET balance = $1::numeric, available = $1::numeric, address = $2, updated_at = NOW()
+             WHERE user_id = $3::int AND currency = $4 AND (purpose IS NULL OR purpose = '')`,
+            [value, deposit.address, userId, CURRENCY]
         );
+        if (uw.rowCount === 0) {
+            await client.query(
+                `INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, created_at, updated_at)
+                 VALUES ($1::int, $2, $3::numeric, $3::numeric, $4, 'lbtc', true, NOW(), NOW())`,
+                [userId, CURRENCY, value, deposit.address]
+            );
+        }
         console.log(`  -> Credited ${value} LBTC to user ${userId}`);
     } catch (err) {
         console.error('  -> Credit error:', err.message);
@@ -244,6 +298,8 @@ console.log(`LBTC monitor started. Watching ${Object.keys(WATCHED).length} addre
 console.log(`  user 58: LRjqhn8LYZS7bHoBbyeBnHvHojA9o3ackH`);
 console.log(`  hot wallet (user 1): LSUsrwZW6qHiwYqU5TgApzprSwY2EbgtAK`);
 console.log(`Min confirmations: ${MIN_CONFIRMATIONS}`);
+loadState();
+if (lastCheckedHeight > 0) console.log(`Resume from block ${lastCheckedHeight}`);
 
 checkDeposits();
 setInterval(checkDeposits, 30 * 1000);
