@@ -1,30 +1,80 @@
 'use strict';
 
 const http = require('http');
+const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
 const crypto = require('crypto');
 
-const RPC_USER = 'coin';
-const RPC_PASS = 'coin';
-const RPC_HOST = '127.0.0.1';
-const RPC_PORT = 19556;
 const CURRENCY = 'lbtc';
 const MIN_CONFIRMATIONS = 3;
 const RPC_DELAY_MS = 350;
+const RECONCILE_USERS = (process.env.LBTC_RECONCILE_USERS || '100,101,102,103,104,105,106,107,108,109')
+    .split(',')
+    .map(s => Number(s.trim()))
+    .filter(n => Number.isInteger(n) && n > 0);
 
-// Watched addresses -> user_id mapping
-const WATCHED = {
-    'LRjqhn8LYZS7bHoBbyeBnHvHojA9o3ackH': 58,  // user 58 deposit
-    'LSUsrwZW6qHiwYqU5TgApzprSwY2EbgtAK': 1,   // exchange hot wallet
-};
+// Watched addresses -> user_id mapping. Reloaded from user_wallets on every
+// cycle, so per-user deposit addresses are picked up without a code change.
+let WATCHED = {};
+let lastWatchedSig = '';
 
 let lastCheckedHeight = 0;
 const pendingDeposits = new Map(); // txid -> deposit info
+
+// PostgreSQL: prefer the published port of the forkex-db container (survives
+// container recreates), fall back to the live container IP.
+const RPC = rpcConfig();
+const DB_AUTH = dbConfig();
+let dbTarget = null;
+
+function containerIp(name) {
+    try {
+        return require('child_process')
+            .execSync(`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${name}`,
+                { encoding: 'utf8', timeout: 5000 })
+            .trim() || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function dbCandidates() {
+    const list = [];
+    if (process.env.LBTC_MONITOR_DB_HOST) {
+        list.push({ host: process.env.LBTC_MONITOR_DB_HOST, port: Number(process.env.LBTC_MONITOR_DB_PORT || 5432) });
+    }
+    list.push({ host: '127.0.0.1', port: 5434 });
+    const ip = containerIp('forkex-db');
+    if (ip) list.push({ host: ip, port: 5432 });
+    return list;
+}
+
+async function connectDb() {
+    const { Client } = require('pg');
+    const candidates = dbTarget ? [dbTarget] : dbCandidates();
+    let lastErr = null;
+    for (const target of candidates) {
+        const client = new Client({ ...target, ...DB_AUTH, connectionTimeoutMillis: 5000 });
+        try {
+            await client.connect();
+            dbTarget = target;
+            return client;
+        } catch (e) {
+            lastErr = e;
+            try { await client.end(); } catch (_) {}
+        }
+    }
+    throw lastErr || new Error('no reachable database');
+}
 
 const STATE_FILE = __dirname + '/lbtc-monitor-state.json';
 
 function loadState() {
     try {
-        lastCheckedHeight = JSON.parse(require('fs').readFileSync(STATE_FILE, 'utf8')).lastCheckedHeight || 0;
+        const saved = JSON.parse(require('fs').readFileSync(STATE_FILE, 'utf8'));
+        lastCheckedHeight = saved.lastCheckedHeight || 0;
+        if (Array.isArray(saved.pendingDeposits)) {
+            for (const [txid, dep] of saved.pendingDeposits) pendingDeposits.set(txid, dep);
+        }
     } catch (e) {
         lastCheckedHeight = 0;
     }
@@ -32,7 +82,10 @@ function loadState() {
 
 function saveState() {
     try {
-        require('fs').writeFileSync(STATE_FILE, JSON.stringify({ lastCheckedHeight }, null, 2));
+        require('fs').writeFileSync(STATE_FILE, JSON.stringify({
+            lastCheckedHeight,
+            pendingDeposits: [...pendingDeposits.entries()],
+        }, null, 2));
     } catch (e) {}
 }
 
@@ -46,12 +99,12 @@ function rpcCall(method, params = []) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify({ jsonrpc: '1.0', method, params, id: Date.now() });
         const opts = {
-            hostname: RPC_HOST,
-            port: RPC_PORT,
+            hostname: RPC.host,
+            port: RPC.port,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + Buffer.from(`${RPC_USER}:${RPC_PASS}`).toString('base64'),
+                'Authorization': 'Basic ' + Buffer.from(`${RPC.user}:${RPC.password}`).toString('base64'),
                 'Content-Length': Buffer.byteLength(body),
             },
         };
@@ -86,6 +139,49 @@ async function rpcCallE(method, params = []) {
         }
     }
     throw new Error(`${method} still rate-limited after retries`);
+}
+
+// Deposit addresses -> user_id, straight from the exchange DB. Rows without a
+// purpose (exchange wallets) win over per-user rows when an address is shared,
+// so the hot wallet keeps crediting the account it always credited.
+async function loadWatched() {
+    const client = await connectDb();
+    try {
+        // network IN ('lbtc','main'), not network = 'lbtc': 12 of the exchange's
+        // own lbtc wallets (hot, cold, treasury, deposit, withdrawal, fee,
+        // bridge, mining, ...) carry network='main' and were therefore invisible
+        // here. Coins parked in hot/treasury - which is where the exchange's own
+        // treasury funding lands - would never be seen and their cached balance
+        // would stay at 0 while the money sat on-chain. Verified: all 35 active
+        // lbtc addresses live on the same chain, so currency is the discriminator.
+        const res = await client.query(
+            `SELECT address, user_id, purpose FROM user_wallets
+              WHERE currency = $1 AND network IN ($1, 'main')
+                AND status = 'active' AND is_valid = true
+                AND address IS NOT NULL AND address <> ''
+              ORDER BY (purpose IS NULL OR purpose = '') DESC, id ASC`,
+            [CURRENCY]
+        );
+        const next = {};
+        const dupes = [];
+        for (const row of res.rows) {
+            if (next[row.address] !== undefined) {
+                dupes.push(`${row.address} -> user ${row.user_id} ignored, user ${next[row.address]} kept`);
+                continue;
+            }
+            next[row.address] = Number(row.user_id);
+        }
+        const sig = JSON.stringify(next);
+        if (sig !== lastWatchedSig) {
+            console.log(`[${new Date().toISOString()}] watched addresses: ${Object.keys(WATCHED).length} -> ${Object.keys(next).length}`);
+            for (const d of dupes) console.log(`[${new Date().toISOString()}] shared address: ${d}`);
+            lastWatchedSig = sig;
+        }
+        WATCHED = next;
+        return Object.keys(next).length;
+    } finally {
+        await client.end();
+    }
 }
 
 function findAddressInVout(vout) {
@@ -186,8 +282,19 @@ async function scanBlock(height) {
     return deposits;
 }
 
+let cycleRunning = false;
 async function checkDeposits() {
+    if (cycleRunning) return;
+    cycleRunning = true;
     try {
+        // Never scan with a stale or empty address map: a failed reload would
+        // silently drop deposits again.
+        try {
+            await loadWatched();
+        } catch (e) {
+            console.error(`[${new Date().toISOString()}] watched-address reload failed: ${e.message}; cycle skipped`);
+            return;
+        }
         const tip = await rpcCallE('getblockcount');
         if (lastCheckedHeight === 0) {
             lastCheckedHeight = Math.max(0, tip - 100);
@@ -222,6 +329,7 @@ async function checkDeposits() {
                 pendingDeposits.set(dep.txid, dep);
             }
         }
+        if (newDeposits.length > 0) saveState();
 
         if (pendingDeposits.size > 0) {
             for (const [txid, dep] of pendingDeposits) {
@@ -236,21 +344,27 @@ async function checkDeposits() {
                 } catch (e) {}
                 await sleepMs();
             }
+            saveState();
         }
 
         if (newDeposits.length === 0 && pendingDeposits.size === 0) {
             console.log(`[${new Date().toISOString()}] OK. Tip: ${tip}`);
         }
+        try {
+            await reconcileBotBalances();
+        } catch (e) {
+            console.error(`[${new Date().toISOString()}] balance reconcile failed: ${e.message}`);
+        }
     } catch (err) {
         console.error(`[${new Date().toISOString()}] Error:`, err.message);
+    } finally {
+        cycleRunning = false;
     }
 }
 
 async function creditBalance(deposit) {
-    const { Client } = require('pg');
-    const client = new Client({ host: '172.18.0.4', port: 5432, database: 'hollaex', user: 'admin', password: 'root' });
+    const client = await connectDb();
     try {
-        await client.connect();
         const existing = await client.query('SELECT id FROM transactions WHERE tx_hash = $1', [deposit.txid]);
         if (existing.rows.length > 0) return;
 
@@ -273,17 +387,24 @@ async function creditBalance(deposit) {
              VALUES ($1::int, 'deposit', $2::numeric, $3, 'completed', 0, '', 'On-chain LBTC deposit', NULL, $4, $5, 'lbtc', '{}', NOW(), NOW())`,
             [userId, value, CURRENCY, deposit.txid, deposit.address]
         );
-        // Sync user_wallets: update first, insert only if no row exists
+        // Sync the deposit address itself. Matched by address, not by
+        // (user, currency): a user can now have several lbtc addresses, and the
+        // old lookup missed purpose='deposit' rows and inserted a duplicate.
+        let addrBalance = value;
+        try {
+            const ab = await rpcCallE('getaddressbalance', [deposit.address]);
+            addrBalance = Number(ab.balance) || value;
+        } catch (e) {}
         const uw = await client.query(
-            `UPDATE user_wallets SET balance = $1::numeric, available = $1::numeric, address = $2, updated_at = NOW()
-             WHERE user_id = $3::int AND currency = $4 AND (purpose IS NULL OR purpose = '')`,
-            [value, deposit.address, userId, CURRENCY]
+            `UPDATE user_wallets SET balance = $1::numeric, available = $1::numeric, updated_at = NOW()
+             WHERE address = $2 AND currency = $3`,
+            [addrBalance, deposit.address, CURRENCY]
         );
         if (uw.rowCount === 0) {
             await client.query(
-                `INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, created_at, updated_at)
-                 VALUES ($1::int, $2, $3::numeric, $3::numeric, $4, 'lbtc', true, NOW(), NOW())`,
-                [userId, CURRENCY, value, deposit.address]
+                `INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, purpose, status, created_at, updated_at)
+                 VALUES ($1::int, $2, $3::numeric, $3::numeric, $4, 'lbtc', true, 'deposit', 'active', NOW(), NOW())`,
+                [userId, CURRENCY, addrBalance, deposit.address]
             );
         }
         console.log(`  -> Credited ${value} LBTC to user ${userId}`);
@@ -294,9 +415,63 @@ async function creditBalance(deposit) {
     }
 }
 
-console.log(`LBTC monitor started. Watching ${Object.keys(WATCHED).length} addresses`);
-console.log(`  user 58: LRjqhn8LYZS7bHoBbyeBnHvHojA9o3ackH`);
-console.log(`  hot wallet (user 1): LSUsrwZW6qHiwYqU5TgApzprSwY2EbgtAK`);
+// The ledger credit above is additive: synthetic seeding, manual edits and
+// missed updates drift `balances` away from the chain. For the bot accounts the
+// wallet wins — force `balances` back onto it every cycle and recompute
+// locked/available from open orders via fx_apply_locks.
+async function reconcileBotBalances() {
+    if (RECONCILE_USERS.length === 0) return;
+    const client = await connectDb();
+    try {
+        const drift = await client.query(
+            `WITH w AS (
+                 SELECT DISTINCT ON (user_id) user_id, balance
+                   FROM user_wallets
+                  WHERE user_id = ANY($1::int[]) AND currency = $2
+                    AND network IN ($2, 'main')
+                    AND status = 'active' AND is_valid = true
+                    AND address IS NOT NULL AND address <> ''
+                    AND balance IS NOT NULL
+                  ORDER BY user_id, (purpose IS NULL OR purpose = '') DESC, id DESC
+             )
+             SELECT b.user_id, b.balance AS old_balance, w.balance AS new_balance
+               FROM balances b
+               JOIN w ON w.user_id = b.user_id
+              WHERE b.currency = $2 AND b.balance IS DISTINCT FROM w.balance
+              ORDER BY b.user_id`,
+            [RECONCILE_USERS, CURRENCY]
+        );
+        if (drift.rows.length === 0) return;
+        const ids = drift.rows.map(r => Number(r.user_id));
+        await client.query(
+            `WITH w AS (
+                 SELECT DISTINCT ON (user_id) user_id, balance
+                   FROM user_wallets
+                  WHERE user_id = ANY($1::int[]) AND currency = $2
+                    AND network IN ($2, 'main')
+                    AND status = 'active' AND is_valid = true
+                    AND address IS NOT NULL AND address <> ''
+                    AND balance IS NOT NULL
+                  ORDER BY user_id, (purpose IS NULL OR purpose = '') DESC, id DESC
+             )
+             UPDATE balances b SET balance = w.balance, updated_at = NOW()
+               FROM w
+              WHERE b.user_id = w.user_id AND b.currency = $2`,
+            [ids, CURRENCY]
+        );
+        for (const id of ids) {
+            await client.query('SELECT fx_apply_locks($1::int)', [id]);
+        }
+        for (const r of drift.rows) {
+            console.log(`[${new Date().toISOString()}] RECONCILE: user ${r.user_id} ${CURRENCY} balance ${Number(r.old_balance)} -> ${Number(r.new_balance)}`);
+        }
+    } finally {
+        await client.end();
+    }
+}
+
+console.log(`LBTC monitor started. Addresses are loaded from user_wallets (currency=${CURRENCY})`);
+console.log(`Database candidates: ${dbCandidates().map(c => `${c.host}:${c.port}`).join(', ')}`);
 console.log(`Min confirmations: ${MIN_CONFIRMATIONS}`);
 loadState();
 if (lastCheckedHeight > 0) console.log(`Resume from block ${lastCheckedHeight}`);

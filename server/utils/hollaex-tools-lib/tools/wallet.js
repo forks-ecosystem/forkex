@@ -269,228 +269,330 @@ const checkTransaction = (currency, transactionId, address, network, isTestnet =
 	return getNodeLib().checkTransaction(currency, transactionId, address, network, { isTestnet, ...opts });
 };
 
+const { estimateNetworkFee, buildWithdrawalFees, COIN_SYMBOL } = require('../../withdrawalFee');
+
 const performWithdrawal = async (userId, address, currency, amount, opts = {
 	network: null,
 	fee_markup: null,
 	additionalHeaders: null
 }) => {
-	// LBTC: local hot wallet withdrawal (before subscribedToCoin check)
+	// LBTC: withdrawal through the node-wallet agent (before subscribedToCoin check)
 	if (currency === 'lbtc') {
 		const { Client } = require('pg');
 		const http = require('http');
-		const crypto = require('crypto');
-		const bitcoin = require('bitcoinjs-lib');
-		const ecc = require('tiny-secp256k1');
-		const { ECPairFactory } = require('ecpair');
-		const bip32 = require('bip32');
-		const bip39 = require('bip39');
-		const fs = require('fs');
 
-		bitcoin.initEccLib(ecc);
-		const ECPair = ECPairFactory(ecc);
+		// The node owns the operational float and is the only signer of record for
+		// it: these addresses have no extractable key (dumpprivkey answers "address
+		// not found") and the external signer demands a privateKey we cannot obtain
+		// for them. So the engine no longer reads a wallet file, links a signing
+		// library or talks to the node RPC: it asks the agent, and the agent lets
+		// the node's own wallet pay. The node picks the source UTXOs, because its
+		// sendtoaddress takes no from-address, so the debit lands on the wallet as
+		// a whole rather than on the labelled hot address.
+		const AGENT_HOST = process.env.LBTC_AGENT_HOST || 'host.docker.internal';
+		const AGENT_PORT = parseInt(process.env.LBTC_AGENT_PORT) || 8444;
+		const AGENT_KEY = process.env.LBTC_AGENT_API_KEY || '';
+		const HOT_WALLET_ADDR = process.env.LBTC_HOT_ADDRESS || 'LSDpPPpUaNNV4B5TbmJgY9tR8gfxpaECvH';
+		const HOT_WALLET_USER_ID = 1;
 
-		const LBTC_RPC_HOST = process.env.LBTC_RPC_HOST || 'host.docker.internal';
-		const LBTC_RPC_PORT = parseInt(process.env.LBTC_RPC_PORT) || 19557;
-
-		const LBTC_NETWORK = {
-			messagePrefix: '\x1cLigercoin Signed Message:\n',
-			bip32: { public: 0x0488B21E, private: 0x0488ADE4 },
-			pubKeyHash: 0x30,
-			scriptHash: 0x32,
-			wif: 0xB0,
-		};
-
-		// Load hot wallet
-		const walletPath = '/app/forkex/wallets/lbtc-hot-wallet.json';
-		const wallet = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
-		const seed = bip39.mnemonicToSeedSync(wallet.mnemonic);
-		const root = bip32.default(ecc).fromSeed(seed);
-		const child = root.derivePath(wallet.path);
-		const hotKeyPair = ECPair.fromPrivateKey(child.privateKey);
-		const hotAddr = bitcoin.payments.p2pkh({ pubkey: hotKeyPair.publicKey, network: LBTC_NETWORK }).address;
-
-		// RPC helper
-		function rpcCall(method, params = []) {
+		function agentCall(method, path, body) {
 			return new Promise((resolve, reject) => {
-				const body = JSON.stringify({ jsonrpc: '1.0', method, params, id: Date.now() });
-				const opts = {
-					hostname: LBTC_RPC_HOST, port: LBTC_RPC_PORT, method: 'POST',
+				const payload = body ? JSON.stringify(body) : '';
+				const req = http.request({
+					hostname: AGENT_HOST, port: AGENT_PORT, path, method,
 					headers: {
 						'Content-Type': 'application/json',
-						'Authorization': 'Basic ' + Buffer.from('coin:coin').toString('base64'),
-						'Content-Length': Buffer.byteLength(body),
+						'X-Api-Key': AGENT_KEY,
+						'Content-Length': Buffer.byteLength(payload),
 					},
-				};
-				const req = http.request(opts, (res) => {
+				}, (res) => {
 					let data = '';
-					res.on('data', (chunk) => data += chunk);
+					res.on('data', (c) => data += c);
 					res.on('end', () => {
-						try { const json = JSON.parse(data); json.error ? reject(new Error(json.error.message)) : resolve(json.result); }
-						catch (e) { reject(e); }
+						let json;
+						try { json = JSON.parse(data); }
+						catch (e) { return reject(new Error(`agent: unparsable reply: ${data.slice(0, 200)}`)); }
+						if (json.error) return reject(new Error(`agent: ${json.error}`));
+						resolve(json.result !== undefined ? json.result : json);
 					});
 				});
-				req.on('error', reject);
-				req.write(body);
+				req.on('error', (e) => reject(new Error(`agent unreachable at ${AGENT_HOST}:${AGENT_PORT}: ${e.message}`)));
+				if (payload) req.write(payload);
 				req.end();
 			});
 		}
 
-		function bs58decode(str) {
-			const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-			let result = BigInt(0);
-			for (const c of str) { const idx = alphabet.indexOf(c); if (idx < 0) throw new Error('Invalid base58'); result = result * BigInt(58) + BigInt(idx); }
-			const hex = result.toString(16).padStart(2, '0');
-			const bytes = Buffer.from(hex.length % 2 ? '0' + hex : hex, 'hex');
-			const leadingOnes = str.split('').filter(c => c === '1').length;
-			return Buffer.concat([Buffer.alloc(leadingOnes), bytes]);
-		}
+		// Relay floor on this node is 1000 base units per KB, i.e. 0.00001 LBTC/KB.
+		// The node chooses the inputs, so the final size is not knowable up front:
+		// assume ~40 LBTC per UTXO (the wallet's denominations top out near 50) and
+		// ~148 bytes per input, then take 4x the floor so the node cannot reject us
+		// for under-paying. A single hardcoded fee is what made the 7 500 LBTC
+		// funding fail with "insufficient fee" once the tx reached 32 KB.
+		const networkFee = estimateNetworkFee(amount);
 
-		function addressToOutputScript(address) {
-			const decoded = bs58decode(address);
-			const hash = decoded.slice(1, 21);
-			return Buffer.concat([Buffer.from([0x76, 0xa9, 0x14]), Buffer.from(hash), Buffer.from([0x88, 0xac])]);
-		}
+		// Refuse an unusable destination before any balance is touched.
+		const vinfo = await agentCall('GET', `/api/chain/lbtc/validate/${encodeURIComponent(address)}`);
+		if (!vinfo || vinfo.isvalid !== true) throw new Error(`invalid LBTC destination address: ${address}`);
 
-		function pushData(data) {
-			const len = data.length;
-			if (len < 0x4c) return Buffer.from([len]);
-			if (len < 0x100) return Buffer.from([0x4c, len]);
-			return Buffer.from([0x4d, len & 0xff, (len >> 8) & 0xff]);
-		}
-
-		function encodeDER(sig) {
-			const r = sig.subarray(0, 32), s = sig.subarray(32, 64);
-			let rStart = 0; while (rStart < r.length - 1 && r[rStart] === 0) rStart++;
-			let sStart = 0; while (sStart < s.length - 1 && s[sStart] === 0) sStart++;
-			const rBytes = r.subarray(rStart), sBytes = s.subarray(sStart);
-			const rBuf = (rBytes[0] & 0x80) ? Buffer.concat([Buffer.from([0x00]), rBytes]) : rBytes;
-			const sBuf = (sBytes[0] & 0x80) ? Buffer.concat([Buffer.from([0x00]), sBytes]) : sBytes;
-			return Buffer.concat([Buffer.from([0x30, 2 + rBuf.length + 2 + sBuf.length]), Buffer.from([0x02, rBuf.length]), rBuf, Buffer.from([0x02, sBuf.length]), sBuf]);
-		}
-
-		function parseBlockTxids(hexStr) {
-			const data = Buffer.from(hexStr, 'hex');
-			if (data.length < 80) return [];
-			const body = data.subarray(80);
-			let offset = 0;
-			const readVarInt = (buf, off) => { const b = buf[off]; if (b < 0xfd) return { value: b, bytesRead: 1 }; if (b === 0xfd) return { value: buf.readUInt16LE(off + 1), bytesRead: 3 }; if (b === 0xfe) return { value: buf.readUInt32LE(off + 1), bytesRead: 5 }; return { value: Number(buf.readBigUInt64LE(off + 1)), bytesRead: 9 }; };
-			const skipTx = (buf, off) => { off += 4; let segwit = false; if (buf[off] === 0x00) { segwit = true; off += 2; } let { value: inC, bytesRead: bl } = readVarInt(buf, off); off += bl; for (let i = 0; i < inC; i++) { off += 36; const { value: sl, bytesRead: slb } = readVarInt(buf, off); off += slb + sl; off += 4; } let { value: outC, bytesRead: ol } = readVarInt(buf, off); off += ol; for (let i = 0; i < outC; i++) { off += 8; const { value: sl, bytesRead: slb } = readVarInt(buf, off); off += slb + sl; } if (segwit) { for (let i = 0; i < inC; i++) { let { value: sc, bytesRead: scl } = readVarInt(buf, off); off += scl; for (let j = 0; j < sc; j++) { const { value: il, bytesRead: ilb } = readVarInt(buf, off); off += ilb + il; } } } off += 4; return off; };
-			const { value: count, bytesRead: countLen } = readVarInt(body, offset); offset += countLen;
-			const txids = [];
-			for (let i = 0; i < count; i++) {
-				const txStart = offset; offset = skipTx(body, offset);
-				const txBytes = body.subarray(txStart, offset);
-				const h1 = crypto.createHash('sha256').update(txBytes).digest();
-				const h2 = crypto.createHash('sha256').update(h1).digest(); h2.reverse();
-				txids.push(h2.toString('hex'));
-			}
-			return txids;
-		}
-
-		// Get tip
-		const tip = await rpcCall('getblockcount');
-		const fromHeight = Math.max(0, tip - 500);
-
-		// Scan UTXOs for hot wallet
-		const scriptPubKeyHex = addressToOutputScript(hotAddr).toString('hex');
-		const utxos = [];
-		const spentOutpoints = new Set();
-		for (let h = fromHeight; h <= tip; h++) {
-			const hash = await rpcCall('getblockhash', [h]);
-			const block = await rpcCall('getblock', [hash]);
-			const txids = Array.isArray(block.tx) ? block.tx : [];
-			if (txids.length === 0 && block.hex) { try { txids.push(...parseBlockTxids(block.hex)); } catch (e) {} }
-			for (const txid of txids) {
-				try {
-					const tx = await rpcCall('getrawtransaction', [txid, true]);
-					for (const vin of (tx.vin || [])) { if (vin.txid) spentOutpoints.add(`${vin.txid}:${vin.vout}`); }
-					for (let n = 0; n < (tx.vout || []).length; n++) {
-						const vout = tx.vout[n];
-						if (vout.scriptPubKey?.hex === scriptPubKeyHex) {
-							const outpoint = `${txid}:${n}`;
-							if (!spentOutpoints.has(outpoint)) {
-								utxos.push({ txid, vout: n, value: vout.value, scriptPubKey: vout.scriptPubKey.hex, confirmations: (tx.confirmations || 0) });
-							}
-						}
-					}
-				} catch (e) {}
-			}
-		}
-
-		// Remove UTXOs that were already spent by later txs in the same scan range
-		const unspentUtxos = utxos.filter(u => !spentOutpoints.has(`${u.txid}:${u.vout}`));
-
-		const fee = 0.0001;
-		const totalAvailable = unspentUtxos.reduce((s, u) => s + u.value, 0);
-		if (totalAvailable < amount + fee) throw new Error(`Insufficient hot wallet funds: ${totalAvailable} LBTC available, need ${amount + fee}`);
-
-		// Select UTXOs
-		unspentUtxos.sort((a, b) => b.value - a.value);
-		let selected = [], selectedTotal = 0;
-		for (const utxo of unspentUtxos) { selected.push(utxo); selectedTotal += utxo.value; if (selectedTotal >= amount + fee) break; }
-
-		// Build and sign tx
-		const tx = new bitcoin.Transaction(); tx.version = 2;
-		const inputScripts = [];
-		for (const utxo of selected) { tx.addInput(Buffer.from(utxo.txid, 'hex').reverse(), utxo.vout); inputScripts.push(Buffer.from(utxo.scriptPubKey, 'hex')); }
-		const recipientScript = addressToOutputScript(address);
-		tx.addOutput(recipientScript, BigInt(Math.round(amount * 1e8)));
-		const changeRaw = selectedTotal - amount - fee;
-		if (changeRaw > 0.000005) tx.addOutput(addressToOutputScript(hotAddr), BigInt(Math.round(changeRaw * 1e8)));
-
-		for (let i = 0; i < selected.length; i++) {
-			const sigHash = tx.hashForSignature(i, inputScripts[i], bitcoin.Transaction.SIGHASH_ALL);
-			const sig = hotKeyPair.sign(Buffer.from(sigHash));
-			const derSig = encodeDER(sig);
-			const combined = Buffer.concat([derSig, Buffer.from([0x01])]);
-			const inputScript = Buffer.concat([pushData(combined), combined, pushData(hotKeyPair.publicKey), Buffer.from(hotKeyPair.publicKey)]);
-			tx.setInputScript(i, inputScript);
-		}
-
-		// Broadcast
-		const txid = await rpcCall('sendrawtransaction', [tx.toHex()]);
-
-		// Record in DB
-		const dbHost = process.env.DB_HOST || '127.0.0.1';
-		const dbPort = parseInt(process.env.DB_PORT) || 5432;
-		const db = new Client({ host: dbHost, port: dbPort, database: process.env.DB_NAME || 'hollaex', user: process.env.DB_USER || 'admin', password: process.env.DB_PASS || 'root' });
+		const db = new Client({
+			host: process.env.DB_HOST || '127.0.0.1',
+			port: parseInt(process.env.DB_PORT) || 5432,
+			database: process.env.DB_NAME || 'hollaex',
+			user: process.env.DB_USER || process.env.DB_USERNAME || 'admin',
+			password: process.env.DB_PASS || process.env.DB_PASSWORD || 'root',
+		});
 		await db.connect();
-		try {
-			// Deduct from requesting user
-			await db.query(
-				`UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
-				 WHERE user_id = $2::int AND currency = 'lbtc' AND (balance - $1::numeric) >= 0`,
-				[amount + fee, userId]
-			);
-			// Also deduct from hot wallet (user 1) — hot wallet is the actual on-chain sender
-			const HOT_WALLET_USER_ID = 1;
-			if (userId !== HOT_WALLET_USER_ID) {
-				await db.query(
-					`UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
-					 WHERE user_id = $2::int AND currency = 'lbtc' AND (balance - $1::numeric) >= 0`,
-					[amount + fee, HOT_WALLET_USER_ID]
-				);
-				await db.query(
-					`UPDATE user_wallets SET balance = b.balance, available = b.available, updated_at = NOW()
-					 FROM balances b WHERE user_wallets.user_id = b.user_id AND user_wallets.currency = b.currency
-					 AND user_wallets.user_id = $1::int AND user_wallets.currency = 'lbtc'`,
-					[HOT_WALLET_USER_ID]
-				);
-			}
-			await db.query(
-				`INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, tx_hash, address, network, metadata, created_at, updated_at)
-				 VALUES ($1::int, 'withdrawal', $2::numeric, 'lbtc', 'completed', $3::numeric, 'lbtc', 'On-chain LBTC withdrawal', $4, $5, 'lbtc', '{}', NOW(), NOW())`,
-				[userId, amount, fee, txid, address]
-			);
-			await db.query(
-				`UPDATE user_wallets SET balance = b.balance, available = b.available, updated_at = NOW()
-				 FROM balances b WHERE user_wallets.user_id = b.user_id AND user_wallets.currency = b.currency
-				 AND user_wallets.user_id = $1::int AND user_wallets.currency = 'lbtc'`,
-				[userId]
-			);
-		} finally { await db.end(); }
 
-		return { transaction_id: txid, fee };
+		const isHot = userId === HOT_WALLET_USER_ID;
+
+		// withdrawals.coin_id is NOT NULL and the fx_withdrawal_guard trigger reads
+		// it to resolve the symbol, so the id has to come from the table rather than
+		// being assumed. withdrawal_fee comes from the same row: it is the exchange's
+		// own commission and is what GET /withdrawal/fee/:currency already quotes to
+		// the user, so charging exactly it here is what makes that quote true.
+		const coinRow = await db.query(
+			`SELECT id, COALESCE(withdrawal_fee, 0) AS withdrawal_fee, withdrawal_fees
+			   FROM coins WHERE symbol = $1 LIMIT 1`,
+			[COIN_SYMBOL]
+		);
+		if (!coinRow.rows.length) {
+			await db.end().catch(() => {});
+			throw new Error('lbtc coin row is missing from coins');
+		}
+		const coinId = coinRow.rows[0].id;
+		let exchangeFee = Number(coinRow.rows[0].withdrawal_fee) || 0;
+		try {
+			const wf = coinRow.rows[0].withdrawal_fees;
+			if (wf && typeof wf === 'object') {
+				const cfg = wf[COIN_SYMBOL] || wf['lbtc'] || null;
+				if (cfg && cfg.type === 'percent' && cfg.value) {
+					exchangeFee = (amount * Number(cfg.value)) / 100;
+				}
+			}
+		} catch (e) {}
+		const { userDebit, hotDebit } = buildWithdrawalFees({
+			amount,
+			withdrawalFee: exchangeFee
+		});
+
+		// userDebit снимает с пользователя обе комиссии, hotDebit — только сетевую.
+		// Формула живёт в utils/withdrawalFee.js, чтобы её нельзя было собрать
+		// заново и потерять одну из компонент.
+
+		// Reserve in the ledger before broadcasting, and verify the reservation
+		// actually happened. The previous code issued this UPDATE and discarded
+		// rowCount, so a user without funds still reached the broadcast: coins left
+		// the exchange with nothing debited. The rowCount check is the guard.
+		//
+		// The withdrawals row is written in the same transaction, BEFORE the debit,
+		// and that order is load-bearing:
+		//   - fx_withdrawal_guard_trg reads balances.available, so it must see the
+		//     pre-debit figure. Inserting after the UPDATE would make a full-balance
+		//     withdrawal look like an overdraft and raise spuriously.
+		//   - the trigger enforces the single/monthly/KYC limits in fx_risk_limits
+		//     and the order-lock coverage check. A withdrawal that never reaches
+		//     `withdrawals` is invisible to all of them, which is how every LBTC
+		//     payout so far skipped the limits entirely.
+		//   - /user/withdrawals reads `withdrawals`, not `transactions`, so without
+		//     this row the payout is debited but never appears in the user's history.
+		let withdrawalId = null;
+		try {
+			await db.query('BEGIN');
+			// FOR UPDATE serialises concurrent withdrawals on the same rows so two
+			// of them cannot both pass the balance check. This is the in-transaction
+			// guard; a durable withdrawal_reserve is still the proper fix.
+			const locked = await db.query(
+				`SELECT user_id, balance FROM balances
+				  WHERE currency = 'lbtc' AND user_id = ANY($1::int[]) FOR UPDATE`,
+				[[HOT_WALLET_USER_ID, userId]]
+			);
+			const bal = {};
+			for (const row of locked.rows) bal[row.user_id] = Number(row.balance);
+
+			if (bal[userId] === undefined) throw new Error(`user ${userId} has no lbtc balance row`);
+			if (bal[userId] < userDebit) {
+				throw new Error(`insufficient LBTC balance for user ${userId}: have ${bal[userId]}, need ${userDebit}`);
+			}
+			if (!isHot) {
+				if (bal[HOT_WALLET_USER_ID] === undefined || bal[HOT_WALLET_USER_ID] < hotDebit) {
+					throw new Error(`hot wallet (user ${HOT_WALLET_USER_ID}) cannot cover ${hotDebit}, has ${bal[HOT_WALLET_USER_ID]}`);
+				}
+			}
+
+			let inserted;
+			try {
+				inserted = await db.query(
+					`INSERT INTO withdrawals
+						(user_id, coin_id, amount, status, address, fee, network_fee, exchange_fee, created_at, updated_at)
+					 VALUES ($1::int, $2::int, $3::numeric, 'processing', $4,
+					         $5::numeric, $6::numeric, $7::numeric, NOW(), NOW())
+					 RETURNING id`,
+					[userId, coinId, amount, address, networkFee + exchangeFee, networkFee, exchangeFee]
+				);
+			} catch (insErr) {
+				// fx_withdrawal_guard raises 23514 with a 'withdrawal blocked: <reason>'
+				// message. That text is the risk-limit verdict, not an internal fault,
+				// so tag it as such rather than letting it surface as a 500-looking
+				// database error. The whole reason this row exists is so that verdict
+				// is reachable.
+				if (insErr.code === '23514' && /withdrawal blocked/.test(insErr.message || '')) {
+					const blocked = new Error(insErr.message);
+					blocked.riskPolicy = true;
+					throw blocked;
+				}
+				throw insErr;
+			}
+			withdrawalId = inserted.rows[0].id;
+
+			for (const [uid, delta] of (isHot ? [[userId, userDebit]] : [[userId, userDebit], [HOT_WALLET_USER_ID, hotDebit]])) {
+				const r = await db.query(
+					`UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+					  WHERE user_id = $2::int AND currency = 'lbtc'`,
+					[delta, uid]
+				);
+				if (r.rowCount !== 1) throw new Error(`debit of user ${uid} touched ${r.rowCount} rows, expected 1`);
+			}
+			await db.query('COMMIT');
+		} catch (err) {
+			await db.query('ROLLBACK').catch(() => {});
+			await db.end().catch(() => {});
+			throw err;
+		}
+
+		// Ledger is reserved; now broadcast. If the node refuses, release the
+		// reservation, otherwise the user is charged for a transfer that never
+		// happened.
+		let txid, paidFee = networkFee;
+		try {
+			const sres = await agentCall('POST', '/api/chain/lbtc/send', {
+				from: HOT_WALLET_ADDR,
+				to: address,
+				amount: Math.round(amount * 1e8),
+				fee: Math.round(networkFee * 1e8),
+			});
+			txid = sres && (sres.txid || sres.tx_id);
+			if (!txid) throw new Error(`agent send returned no txid: ${JSON.stringify(sres).slice(0, 200)}`);
+			// The node reports the fee it really paid, in base units. We passed an
+			// explicit fee and it should honour that exactly, but record what the
+			// chain says so the ledger cannot drift from the transaction. Only the
+			// network component is settled against the chain; the exchange fee is
+			// ours and the chain has no opinion on it.
+			if (sres.fee !== undefined && Number(sres.fee) !== Math.round(networkFee * 1e8)) {
+				console.warn(`[lbtc] node charged ${Number(sres.fee) / 1e8} LBTC, ledger reserved ${networkFee} LBTC for ${txid}`);
+			}
+			paidFee = sres.fee !== undefined ? Number(sres.fee) / 1e8 : networkFee;
+		} catch (err) {
+			// The chain refused, so the reservation is void: give the money back and
+			// close the row. Leaving it at 'processing' would keep the amount
+			// counted against the monthly cap for a transfer that never happened.
+			await db.query('BEGIN').catch(() => {});
+			for (const [uid, delta] of (isHot ? [[userId, userDebit]] : [[userId, userDebit], [HOT_WALLET_USER_ID, hotDebit]])) {
+				await db.query(
+					`UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW()
+					  WHERE user_id = $2::int AND currency = 'lbtc'`,
+					[delta, uid]
+				).catch(() => {});
+			}
+			if (withdrawalId) {
+				await db.query(
+					`UPDATE withdrawals SET status = 'failed', updated_at = NOW() WHERE id = $1::int`,
+					[withdrawalId]
+				).catch(() => {});
+			}
+			await db.query('COMMIT').catch(() => {});
+			await db.end().catch(() => {});
+			throw err;
+		}
+
+		// The chain accepted the transfer. From here the coins are gone whatever the
+		// ledger does, so the write must be retried rather than surfaced as a failed
+		// withdrawal — telling the user "error" would invite a second payout.
+		let ledgerErr = null;
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				await db.query('BEGIN');
+				// The reservation debited `amount + networkFee + exchangeFee`; the
+				// chain actually charged `amount + paidFee`. Settle the network
+				// difference in the same transaction so the ledger ends on the real
+				// figure instead of silently keeping whatever we guessed. The
+				// exchange fee is deliberately not part of this settlement: it was
+				// never a chain cost, so the chain cannot under- or over-charge it.
+				// Underpay returns coins to the user, overpay takes them — an overpay
+				// can push a balance negative, which is recorded rather than refused,
+				// because refusing here would leave the ledger describing a
+				// transaction the chain already settled.
+				const feeDelta = buildWithdrawalFees({
+					amount,
+					withdrawalFee: exchangeFee,
+					paidNetworkFee: paidFee
+				}).networkDelta;
+				if (feeDelta !== 0) {
+					for (const uid of isHot ? [userId] : [userId, HOT_WALLET_USER_ID]) {
+						const r = await db.query(
+							`UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
+							  WHERE user_id = $2::int AND currency = 'lbtc'`,
+							[feeDelta, uid]
+						);
+						if (r.rowCount !== 1) throw new Error(`fee settlement of user ${uid} touched ${r.rowCount} rows, expected 1`);
+					}
+				}
+				await db.query(
+					`UPDATE withdrawals
+					    SET status = 'completed',
+					    tx_hash = $2,
+					    network_fee = $3::numeric,
+					    fee = $3::numeric + $4::numeric,
+					    updated_at = NOW()
+					  WHERE id = $1::int`,
+					[withdrawalId, txid, paidFee, exchangeFee]
+				);
+				await db.query(
+					`INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, tx_hash, address, network, metadata, created_at, updated_at)
+					 VALUES ($1::int, 'withdrawal', $2::numeric, 'lbtc', 'completed', $3::numeric, 'lbtc', 'On-chain LBTC withdrawal', $4, $5, 'lbtc', '{}', NOW(), NOW())`,
+					[userId, amount, paidFee + exchangeFee, txid, address]
+				);
+				// Deliberately no balances -> user_wallets mirror here. That mirror wrote
+				// a user's entire wallet set to one value, and on 2026-09-27 it stamped
+				// every operational address of user 1 with 7499.99, which no single
+				// address held. user_wallets.balance is the on-chain balance of one
+				// address and may only be written from chain data, which is the deposit
+				// monitor's job. The node wallet total is the authoritative float.
+				await db.query('COMMIT');
+				ledgerErr = null;
+				break;
+			} catch (e) {
+				ledgerErr = e;
+				await db.query('ROLLBACK').catch(() => {});
+				console.error(`[lbtc] ledger write attempt ${attempt}/3 failed for ${txid}:`, e.message);
+				await new Promise((r) => setTimeout(r, 250 * attempt));
+			}
+		}
+		await db.end().catch(() => {});
+		if (ledgerErr) {
+			// Do not throw: the payout is on chain. The withdrawal row is still
+			// 'processing', which is how an operator spots it and reconciles.
+			console.error(
+				`[lbtc] CRITICAL: ${txid} was broadcast but not recorded. user=${userId} amount=${amount} fee=${paidFee} — reconcile withdrawals #${withdrawalId}`
+			);
+		}
+
+		// `fee` is what the user was actually charged, so the success response
+		// cannot quietly under-report it: the controller passes this straight
+		// back to the client, and returning the network fee alone would tell
+		// them 0.0002 after debiting 0.0102 — and would contradict the 0.01 that
+		// GET /withdrawal/fee/lbtc already quoted. The breakdown rides along so
+		// the UI can show where the fee went.
+		const settled = buildWithdrawalFees({
+			amount,
+			withdrawalFee: exchangeFee,
+			paidNetworkFee: paidFee
+		});
+		return {
+			transaction_id: txid,
+			fee: settled.settledTotalFee,
+			network_fee: settled.settledNetworkFee,
+			exchange_fee: settled.exchangeFee
+		};
 	}
 
 	// Non-LBTC: delegate to network (original flow)

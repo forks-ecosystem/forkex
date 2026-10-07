@@ -198,10 +198,15 @@ const performWithdrawal = (req, res) => {
 				]);
 			}
 		})
-		.then(([ { transaction_id }, { fee } ]) => {
+		.then(([ { transaction_id }, { fee, network_fee, exchange_fee } ]) => {
+			// `fee` is the total charged to the user. The split is included when the
+			// coin provides it (LBTC) so the client can show network vs exchange
+			// commission instead of an unexplained number.
 			return res.json({
 				message: 'Withdrawal successful',
 				fee,
+				...(network_fee !== undefined && { network_fee }),
+				...(exchange_fee !== undefined && { exchange_fee }),
 				transaction_id
 			});
 		})

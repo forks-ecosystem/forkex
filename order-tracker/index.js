@@ -3,7 +3,13 @@ const { Pool } = require('pg');
 
 const app = express();
 const PORT = 8084;
-const DB = 'postgres://admin:root@localhost:5454/hollaex';
+// Credentials come from the environment. The previous literal pointed at
+// port 5454, which nothing listens on, so this service could not have worked.
+const DB = (() => {
+    const v = process.env.LBTC_DB_URL;
+    if (!v) throw new Error('LBTC_DB_URL is not set; see /etc/lbtc-ops/order-tracker.env');
+    return v;
+})();
 const EXPLORER_URL = 'http://127.0.0.1:8083';
 
 const db = new Pool({ connectionString: DB });

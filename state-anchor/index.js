@@ -2,10 +2,23 @@ const { createHash } = require('crypto');
 const { Pool } = require('pg');
 const http = require('http');
 
-const DB = 'postgres://admin:root@localhost:5454/hollaex';
-const RPC_PORT = 19056;
-const RPC_USER = 'coin';
-const RPC_PASS = 'coin';
+// Credentials and endpoints come from the environment. No defaults: this file
+// previously pointed at port 5454 (no such listener) and RPC 19056, which is the
+// secondary node rather than the main chain at 19556, so starting it as-is would
+// have silently anchored state to the wrong node.
+function requireEnv(name) {
+    const v = process.env[name];
+    if (v === undefined || v === '') {
+        throw new Error(`${name} is not set; see /etc/lbtc-ops/state-anchor.env`);
+    }
+    return v;
+}
+
+const DB = requireEnv('LBTC_DB_URL');
+const RPC_HOST = requireEnv('LBTC_RPC_HOST');
+const RPC_PORT = Number(requireEnv('LBTC_RPC_PORT'));
+const RPC_USER = requireEnv('LBTC_RPC_USER');
+const RPC_PASS = requireEnv('LBTC_RPC_PASSWORD');
 const NODE_ID = 'node1';
 const CHECK_INTERVAL = 30000;
 const SYNC_TABLES = [
@@ -34,7 +47,7 @@ async function rpcCall(method, params = []) {
   const auth = Buffer.from(rpcAuth).toString('base64');
   return new Promise((resolve, reject) => {
     const req = http.request({
-      hostname: '127.0.0.1', port: RPC_PORT, path: '/',
+      hostname: RPC_HOST, port: RPC_PORT, path: '/',
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain',

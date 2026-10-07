@@ -15,11 +15,11 @@ const getDepositsUtils = async (params) => {
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
       offset: (parseInt(page) - 1) * parseInt(limit),
-      include: [{
-        model: Coin,
-        as: 'coin',
-        attributes: ['symbol']
-      }]
+        include: [{
+          model: Coin,
+          as: 'coin',
+          attributes: ['symbol', 'name']
+        }]
     });
     
     const formatted = deposits.map(d => formatDeposit(d));
@@ -155,18 +155,42 @@ const getAdminDepositsUtils = async (params) => {
   }
 };
 
+// Таблица `deposits` хранит строковый статус, и wallet-scanner/index.js пишет
+// туда 'completed'. Проверка `=== '1'` никогда не срабатывала, поэтому status
+// всегда был false и в истории у пользователя каждый завершённый депозит
+// отображался как «Pending» (колонка STATUS в TransactionsHistory).
+// Фронт ждёт булев status, поэтому проекция перечисляет все значения, которые
+// реально пишет сканер, и любое неизвестное трактует как «ещё не завершён».
+const isDepositCompleted = (status) =>
+  status === 'completed' || status === '1' || status === 1 || status === true;
+
 // Форматирование депозита для пользователя
-const formatDeposit = (deposit) => ({
-  id: deposit.id,
-  user_id: deposit.user_id,
-  coin_id: deposit.coin_id,
-  amount: parseFloat(deposit.amount),
-  status: deposit.status === '1' || deposit.status === true,
-  created_at: deposit.created_at,
-  updated_at: deposit.updated_at,
-  currency: deposit.coin?.symbol?.toLowerCase() || '',
-  symbol: deposit.coin?.symbol?.toLowerCase() || ''
-});
+const formatDeposit = (deposit) => {
+  const currency = deposit.coin?.symbol?.toLowerCase() || '';
+  const txHash = deposit.tx_hash || '';
+  return {
+    id: deposit.id,
+    user_id: deposit.user_id,
+    coin_id: deposit.coin_id,
+    amount: parseFloat(deposit.amount),
+    fee: deposit.fee ? parseFloat(deposit.fee) : 0,
+    fee_coin_display: currency.toUpperCase(),
+    status: isDepositCompleted(deposit.status),
+    type: 'deposit',
+    // transaction_id читает generateWithdrawalsHeaders (он же generateDepositsHeaders):
+    // без него ссылка «VIEW» показывала пустой Transaction ID.
+    transaction_id: txHash,
+    txid: txHash,
+    tx_hash: txHash,
+    address: deposit.address || '',
+    network: currency,
+    created_at: deposit.created_at,
+    updated_at: deposit.updated_at,
+    currency,
+    symbol: currency,
+    coin_name: deposit.coin?.name || ''
+  };
+};
 
 // Форматирование депозита для админки (расширенная информация)
 const formatAdminDeposit = (deposit) => ({
@@ -179,10 +203,10 @@ const formatAdminDeposit = (deposit) => ({
   coin_name: deposit.coin?.name || '',
   amount: parseFloat(deposit.amount),
   amount_fiat: deposit.amount_fiat ? parseFloat(deposit.amount_fiat) : null,
-  status: deposit.status === '1' || deposit.status === true,
-  transaction_id: deposit.transaction_id || '',
+  status: isDepositCompleted(deposit.status),
+  transaction_id: deposit.tx_hash || '',
   address: deposit.address || '',
-  txid: deposit.txid || '',
+  txid: deposit.tx_hash || '',
   confirmations: deposit.confirmations || 0,
   required_confirmations: deposit.required_confirmations || 0,
   network: deposit.network || '',
@@ -196,5 +220,6 @@ module.exports = {
   getDepositsUtils,
   getAdminDepositsUtils,
   formatDeposit,
-  formatAdminDeposit
+  formatAdminDeposit,
+  isDepositCompleted
 };

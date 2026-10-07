@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
 const crypto = require('crypto');
 const bitcoin = require('bitcoinjs-lib');
 const ecc = require('tiny-secp256k1');
@@ -20,10 +21,6 @@ const LBTC_NETWORK = {
     wif: 0xB0,
 };
 
-const RPC_USER = 'coin';
-const RPC_PASS = 'coin';
-const RPC_HOST = '127.0.0.1';
-const RPC_PORT = 19556;
 const CURRENCY = 'lbtc';
 const HOT_WALLET_PATH = 'm/44\'/177\'/0\'/0/0';
 
@@ -31,12 +28,12 @@ function rpcCall(method, params = []) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify({ jsonrpc: '1.0', method, params, id: Date.now() });
         const opts = {
-            hostname: RPC_HOST,
-            port: RPC_PORT,
+            hostname: RPC.host,
+            port: RPC.port,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + Buffer.from(`${RPC_USER}:${RPC_PASS}`).toString('base64'),
+                'Authorization': 'Basic ' + Buffer.from(`${RPC.user}:${RPC.password}`).toString('base64'),
                 'Content-Length': Buffer.byteLength(body),
             },
         };
@@ -396,31 +393,37 @@ async function broadcastTransaction(tx) {
 // --- DB HELPERS ---
 
 async function getDbClient() {
-    const client = new Client({ host: '127.0.0.1', port: 5454, database: 'hollaex', user: 'admin', password: 'root' });
+    const client = new Client(dbConfig());
     await client.connect();
     return client;
 }
 
-async function recordWithdrawal(db, userId, amount, txHash, address, fee = 0) {
-    await db.query(
-        `UPDATE balances SET balance = balance - $1::numeric - $3::numeric, available = available - $1::numeric - $3::numeric, updated_at = NOW()
-         WHERE user_id = $2::int AND currency = $4 AND (balance - $1::numeric - $3::numeric) >= 0`,
-        [amount, userId, fee, CURRENCY]
-    );
-    await db.query(
-        `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
-         VALUES ($1::int, 'withdrawal', $2::numeric, $4, 'completed', $3::numeric, $4, 'On-chain LBTC withdrawal', NULL, $5, $6, 'lbtc', '{}', NOW(), NOW())`,
-        [userId, amount, fee, CURRENCY, txHash, address]
-    );
-    // Sync user_wallets
-    await db.query(
-        `UPDATE user_wallets SET balance = b.balance, available = b.available, updated_at = NOW()
-         FROM balances b WHERE user_wallets.user_id = b.user_id AND user_wallets.currency = b.currency
-         AND user_wallets.user_id = $1::int AND user_wallets.currency = $2`,
-        [userId, CURRENCY]
-    );
-    console.log(`[DB] Recorded withdrawal: ${amount} LBTC to ${address}, tx: ${txHash}`);
-}
+  async function recordWithdrawal(db, userId, amount, txHash, address, fee = 0) {
+      const total = Number(amount) + Number(fee);
+      // Check rowCount: the old form fired the UPDATE and ignored the result, so a
+      // user without funds still got a recorded, broadcast withdrawal with nothing
+      // debited. One row for one user+currency, so anything else means the write
+      // did not land and must not be papered over with a transaction row.
+      const upd = await db.query(
+          `UPDATE balances SET balance = balance - $1::numeric - $3::numeric, available = available - $1::numeric - $3::numeric, updated_at = NOW()
+           WHERE user_id = $2::int AND currency = $4 AND (balance - $1::numeric - $3::numeric) >= 0`,
+          [amount, userId, fee, CURRENCY]
+      );
+      if (upd.rowCount !== 1) {
+          throw new Error(`balance debit for user ${userId} touched ${upd.rowCount} rows, expected 1 (need ${total} LBTC)`);
+      }
+      await db.query(
+          `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
+           VALUES ($1::int, 'withdrawal', $2::numeric, $4, 'completed', $3::numeric, $4, 'On-chain LBTC withdrawal', NULL, $5, $6, 'lbtc', '{}', NOW(), NOW())`,
+          [userId, amount, fee, CURRENCY, txHash, address]
+      );
+      // No user_wallets sync here on purpose. Writing b.balance into every wallet
+      // of the user stamped all 13 of user 1's addresses with 7499.99 on
+      // 2026-09-27, a value no single address held. user_wallets.balance is one
+      // address's on-chain balance and is written from chain data by
+      // check-lbtc-deposits.js, matched by address.
+      console.log(`[DB] Recorded withdrawal: ${amount} LBTC to ${address}, tx: ${txHash}`);
+  }
 
 // --- MAIN WITHDRAWAL FUNCTION ---
 

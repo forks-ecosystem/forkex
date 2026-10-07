@@ -45,6 +45,18 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: 0
     },
 
+    network_fee: {
+      type: DataTypes.DECIMAL(20, 10),
+      allowNull: true,
+      defaultValue: 0
+    },
+
+    exchange_fee: {
+      type: DataTypes.DECIMAL(20, 10),
+      allowNull: true,
+      defaultValue: 0
+    },
+
     createdAt: {
       type: DataTypes.DATE,
       field: 'created_at'

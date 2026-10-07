@@ -40,10 +40,23 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true
     },
 
-    fee: {
-      type: DataTypes.DECIMAL(20, 10),
-      defaultValue: 0
-    },
+  fee: {
+    type: DataTypes.DECIMAL(20, 10),
+    defaultValue: 0
+  },
+
+  network_fee: {
+    type: DataTypes.DECIMAL(20, 10),
+    allowNull: true,
+    defaultValue: 0
+  },
+
+  exchange_fee: {
+    type: DataTypes.DECIMAL(20, 10),
+    allowNull: true,
+    defaultValue: 0
+  },
+
 
     createdAt: {
       type: DataTypes.DATE,

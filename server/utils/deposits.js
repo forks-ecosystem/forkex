@@ -16,17 +16,25 @@ const getDepositsUtils = async (params) => {
       include: [{
         model: Coin,
         as: 'coin',
-        attributes: ['symbol'] // например, BTC, ETH и т.п.
+        attributes: ['symbol', 'name'] // например, BTC, ETH и т.п.
       }]
     });
+    // The deposit screen renders the address and the transaction id, so both have
+    // to reach the client. `txid`/`transaction_id` are aliases: the user view and
+    // the admin view read different key names for the same value.
     const formatted = deposits.map(d => ({
       id: d.id,
       user_id: d.user_id,
       coin_id: d.coin_id,
       amount: parseFloat(d.amount),
       status: d.status === 'completed' || d.status === '1' || d.status === true,
+      address: d.address || '',
+      tx_hash: d.tx_hash || '',
+      txid: d.tx_hash || '',
+      transaction_id: d.tx_hash || '',
       created_at: d.created_at,
       updated_at: d.updated_at,
+      coin_name: d.coin?.name || '',
       currency: d.coin?.symbol?.toLowerCase() || '',
       symbol: d.coin?.symbol?.toLowerCase() || ''
     }));

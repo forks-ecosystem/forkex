@@ -522,6 +522,16 @@ paths:
           required: true
           type: string
           maxLength: 256
+        - name: amount
+          description: withdrawal amount
+          in: query
+          required: false
+          type: number
+        - name: network
+          description: network
+          in: query
+          required: false
+          type: string
       responses:
         200:
           description: Success
