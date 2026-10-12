@@ -102,6 +102,19 @@ const getWithdrawalFee = (currency, network, amount, level) => {
 		fee = 0;
 	}
 
+	// LBTC: единственная комиссия — тариф биржи (процент от суммы с полом `min`).
+	// Считаем её здесь той же формулой, что и в performWithdrawal, иначе
+	// балансовая проверка/цитата (amount + 0.05) разойдутся с фактическим
+	// списанием (amount + 0.02). Для email/fiat ветки выше оставляем как есть.
+	if (currency === 'lbtc' && network !== 'email' && network !== 'fiat') {
+		fee = computeExchangeFee({
+			amount,
+			withdrawalFee: coinConfiguration.withdrawal_fee,
+			withdrawalFees: coinConfiguration.withdrawal_fees
+		});
+		fee_coin = 'lbtc';
+	}
+
 	return { fee, fee_coin };
 };
 
@@ -269,7 +282,46 @@ const checkTransaction = (currency, transactionId, address, network, isTestnet =
 	return getNodeLib().checkTransaction(currency, transactionId, address, network, { isTestnet, ...opts });
 };
 
-const { estimateNetworkFee, buildWithdrawalFees, COIN_SYMBOL } = require('../../withdrawalFee');
+const { estimateNetworkFee, buildWithdrawalFees, computeExchangeFee, COIN_SYMBOL } = require('../../withdrawalFee');
+
+// Append-only audit of a withdrawal's lifecycle, one row per stage. Best-effort
+// by design: recording an event must never abort or alter a payout, so every
+// error here is swallowed and logged rather than thrown. There is no foreign
+// key to `withdrawals` on purpose - an operator may delete a failed withdrawal
+// (its reservation has been refunded, so it must not count against the monthly
+// cap), and the reason it failed has to outlive that deletion. `withdrawal_id`
+// is a plain indexed integer for correlation, and may be null when a withdrawal
+// never got far enough to be inserted.
+const recordWithdrawalEvent = async (db, {
+	withdrawalId = null,
+	stage,
+	eventType,
+	status,
+	errorCode = null,
+	errorMessage = null,
+	txid = null,
+	details = null
+}) => {
+	try {
+		await db.query(
+			`INSERT INTO withdrawal_events
+			   (withdrawal_id, stage, event_type, status, error_code, error_message, txid, details, created_at)
+			 VALUES ($1::int, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+			[
+				withdrawalId,
+				stage,
+				eventType,
+				status,
+				errorCode,
+				errorMessage ? String(errorMessage).slice(0, 4000) : null,
+				txid,
+				details ? JSON.stringify(details).slice(0, 8000) : null
+			]
+		);
+	} catch (e) {
+		console.error('[lbtc] withdrawal_events insert failed:', e.message);
+	}
+};
 
 const performWithdrawal = async (userId, address, currency, amount, opts = {
 	network: null,
@@ -294,6 +346,11 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 		const AGENT_KEY = process.env.LBTC_AGENT_API_KEY || '';
 		const HOT_WALLET_ADDR = process.env.LBTC_HOT_ADDRESS || 'LSDpPPpUaNNV4B5TbmJgY9tR8gfxpaECvH';
 		const HOT_WALLET_USER_ID = 1;
+		// Нарешённый float пользовательских средств: из него выплата сначала
+		// перегоняется в операционный float (`withdrawal`), и только потом идёт
+		// получателю. Так на-chain баланс `users` зеркалит списываемые
+		// обязательства, а не только БД.
+		const STAGING_WALLET = process.env.LBTC_STAGING_WALLET || 'users';
 
 		function agentCall(method, path, body) {
 			return new Promise((resolve, reject) => {
@@ -330,10 +387,6 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 		// funding fail with "insufficient fee" once the tx reached 32 KB.
 		const networkFee = estimateNetworkFee(amount);
 
-		// Refuse an unusable destination before any balance is touched.
-		const vinfo = await agentCall('GET', `/api/chain/lbtc/validate/${encodeURIComponent(address)}`);
-		if (!vinfo || vinfo.isvalid !== true) throw new Error(`invalid LBTC destination address: ${address}`);
-
 		const db = new Client({
 			host: process.env.DB_HOST || '127.0.0.1',
 			port: parseInt(process.env.DB_PORT) || 5432,
@@ -342,6 +395,22 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 			password: process.env.DB_PASS || process.env.DB_PASSWORD || 'root',
 		});
 		await db.connect();
+
+		// Refuse an unusable destination before any balance is touched. The
+		// connection is opened first only so the refusal can be recorded.
+		const vinfo = await agentCall('GET', `/api/chain/lbtc/validate/${encodeURIComponent(address)}`);
+		if (!vinfo || vinfo.isvalid !== true) {
+			await recordWithdrawalEvent(db, {
+				stage: 'validate',
+				eventType: 'destination',
+				status: 'error',
+				errorCode: 'invalid_destination',
+				errorMessage: `invalid LBTC destination address: ${address}`,
+				details: { userId, address, currency: COIN_SYMBOL }
+			});
+			await db.end().catch(() => {});
+			throw new Error(`invalid LBTC destination address: ${address}`);
+		}
 
 		const isHot = userId === HOT_WALLET_USER_ID;
 
@@ -360,24 +429,22 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 			throw new Error('lbtc coin row is missing from coins');
 		}
 		const coinId = coinRow.rows[0].id;
-		let exchangeFee = Number(coinRow.rows[0].withdrawal_fee) || 0;
-		try {
-			const wf = coinRow.rows[0].withdrawal_fees;
-			if (wf && typeof wf === 'object') {
-				const cfg = wf[COIN_SYMBOL] || wf['lbtc'] || null;
-				if (cfg && cfg.type === 'percent' && cfg.value) {
-					exchangeFee = (amount * Number(cfg.value)) / 100;
-				}
-			}
-		} catch (e) {}
+		// Единственная комиссия, которую платит пользователь: тариф биржи —
+		// процент от суммы с полом `min`, либо фиксированное значение.
+		const exchangeFee = computeExchangeFee({
+			amount,
+			withdrawalFee: coinRow.rows[0].withdrawal_fee,
+			withdrawalFees: coinRow.rows[0].withdrawal_fees
+		});
 		const { userDebit, hotDebit } = buildWithdrawalFees({
 			amount,
 			withdrawalFee: exchangeFee
 		});
 
-		// userDebit снимает с пользователя обе комиссии, hotDebit — только сетевую.
-		// Формула живёт в utils/withdrawalFee.js, чтобы её нельзя было собрать
-		// заново и потерять одну из компонент.
+		// userDebit снимает с пользователя выплату и ЕДИНСТВЕННУЮ комиссию (тариф
+		// биржи); hotDebit — выплату и сетевую, потому что сеть оплачивает биржа
+		// из тарифа. Формула живёт в utils/withdrawalFee.js, чтобы её нельзя было
+		// собрать заново и потерять одну из компонент.
 
 		// Reserve in the ledger before broadcasting, and verify the reservation
 		// actually happened. The previous code issued this UPDATE and discarded
@@ -427,7 +494,7 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 					 VALUES ($1::int, $2::int, $3::numeric, 'processing', $4,
 					         $5::numeric, $6::numeric, $7::numeric, NOW(), NOW())
 					 RETURNING id`,
-					[userId, coinId, amount, address, networkFee + exchangeFee, networkFee, exchangeFee]
+					[userId, coinId, amount, address, exchangeFee, networkFee, exchangeFee]
 				);
 			} catch (insErr) {
 				// fx_withdrawal_guard raises 23514 with a 'withdrawal blocked: <reason>'
@@ -455,15 +522,57 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 			await db.query('COMMIT');
 		} catch (err) {
 			await db.query('ROLLBACK').catch(() => {});
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'reserve',
+				eventType: 'reserve',
+				status: 'error',
+				errorCode: err.riskPolicy ? 'risk_blocked' : 'reserve_failed',
+				errorMessage: err.message,
+				details: { userId, amount, currency: COIN_SYMBOL, address }
+			});
 			await db.end().catch(() => {});
 			throw err;
 		}
+		await recordWithdrawalEvent(db, {
+			withdrawalId,
+			stage: 'reserve',
+			eventType: 'reserve',
+			status: 'ok',
+			details: { userId, amount, userDebit, hotDebit, currency: COIN_SYMBOL }
+		});
 
 		// Ledger is reserved; now broadcast. If the node refuses, release the
 		// reservation, otherwise the user is charged for a transfer that never
 		// happened.
 		let txid, paidFee = networkFee;
+		let stagedTxid = null;
 		try {
+			// Fund the payout from the user aggregate before broadcasting: move
+			// the user's total (amount + exchange fee) from the `users` float into
+			// the operational payout wallet. Without this a withdrawal drained the
+			// exchange's own float and left the on-chain `users` float untouched,
+			// so user funds never mirrored the debited liability.
+			if (!isHot) {
+				const st = await agentCall('POST', '/api/chain/lbtc/send', {
+					wallet: STAGING_WALLET,
+					from: HOT_WALLET_ADDR,
+					to: HOT_WALLET_ADDR,
+					amount: Math.round(userDebit * 1e8),
+					fee: Math.round(networkFee * 1e8),
+				});
+				stagedTxid = st && (st.txid || st.tx_id);
+				if (!stagedTxid) throw new Error(`staging send returned no txid: ${JSON.stringify(st).slice(0, 200)}`);
+				await recordWithdrawalEvent(db, {
+					withdrawalId,
+					stage: 'stage',
+					eventType: 'transfer',
+					status: 'ok',
+					txid: stagedTxid,
+					details: { from: STAGING_WALLET, to: 'withdrawal', amount: userDebit, currency: COIN_SYMBOL }
+				});
+			}
+
 			const sres = await agentCall('POST', '/api/chain/lbtc/send', {
 				from: HOT_WALLET_ADDR,
 				to: address,
@@ -481,10 +590,46 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 				console.warn(`[lbtc] node charged ${Number(sres.fee) / 1e8} LBTC, ledger reserved ${networkFee} LBTC for ${txid}`);
 			}
 			paidFee = sres.fee !== undefined ? Number(sres.fee) / 1e8 : networkFee;
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'broadcast',
+				eventType: 'send',
+				status: 'ok',
+				txid,
+				details: { to: address, amount, fee: paidFee, currency: COIN_SYMBOL }
+			});
 		} catch (err) {
 			// The chain refused, so the reservation is void: give the money back and
 			// close the row. Leaving it at 'processing' would keep the amount
 			// counted against the monthly cap for a transfer that never happened.
+			// If the `users` float was already debited to fund the payout, send those
+			// coins back so the two floats are not left skewed by a broadcast that
+			// never landed.
+			if (stagedTxid) {
+				try {
+					const uw = await agentCall('GET', `/api/wallet/${encodeURIComponent(STAGING_WALLET)}/balances`);
+					const usersAddr = uw && Array.isArray(uw.addresses) && uw.addresses.length ? uw.addresses[0].address : null;
+					if (usersAddr) {
+						await agentCall('POST', '/api/chain/lbtc/send', {
+							from: HOT_WALLET_ADDR,
+							to: usersAddr,
+							amount: Math.round(userDebit * 1e8),
+							fee: Math.round(networkFee * 1e8),
+						});
+					}
+				} catch (revErr) {
+					console.warn(`[lbtc] staging reversal failed for withdrawal ${withdrawalId}: ${revErr.message}`);
+				}
+			}
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'broadcast',
+				eventType: 'send',
+				status: 'error',
+				errorCode: 'agent_send_failed',
+				errorMessage: err.message,
+				details: { to: address, amount, fee: networkFee, currency: COIN_SYMBOL }
+			});
 			await db.query('BEGIN').catch(() => {});
 			for (const [uid, delta] of (isHot ? [[userId, userDebit]] : [[userId, userDebit], [HOT_WALLET_USER_ID, hotDebit]])) {
 				await db.query(
@@ -500,6 +645,13 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 				).catch(() => {});
 			}
 			await db.query('COMMIT').catch(() => {});
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'rollback',
+				eventType: 'refund',
+				status: 'ok',
+				details: { userId, userDebit, hotDebit, currency: COIN_SYMBOL }
+			});
 			await db.end().catch(() => {});
 			throw err;
 		}
@@ -511,15 +663,15 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 		for (let attempt = 1; attempt <= 3; attempt++) {
 			try {
 				await db.query('BEGIN');
-				// The reservation debited `amount + networkFee + exchangeFee`; the
-				// chain actually charged `amount + paidFee`. Settle the network
-				// difference in the same transaction so the ledger ends on the real
-				// figure instead of silently keeping whatever we guessed. The
-				// exchange fee is deliberately not part of this settlement: it was
-				// never a chain cost, so the chain cannot under- or over-charge it.
-				// Underpay returns coins to the user, overpay takes them — an overpay
-				// can push a balance negative, which is recorded rather than refused,
-				// because refusing here would leave the ledger describing a
+				// The reservation debited the user `amount + exchangeFee` and the
+				// hot float `amount + networkFee` (estimate); the chain actually
+				// charged `amount + paidFee`. Settle that network difference on the
+				// hot float so it ends on the real figure instead of holding the
+				// guess. The exchange commission is never part of this settlement —
+				// it is our tariff, the chain has no opinion on it — and neither is
+				// the user: the user already paid the fixed tariff. An overpay can
+				// push the hot balance negative, which is recorded rather than
+				// refused, because refusing here would leave the ledger describing a
 				// transaction the chain already settled.
 				const feeDelta = buildWithdrawalFees({
 					amount,
@@ -527,7 +679,10 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 					paidNetworkFee: paidFee
 				}).networkDelta;
 				if (feeDelta !== 0) {
-					for (const uid of isHot ? [userId] : [userId, HOT_WALLET_USER_ID]) {
+					// Сеть оплачивает биржа из тарифа, поэтому отклонение фактической
+					// сетевой комиссии от оценки сверяется ТОЛЬКО с hot-флотом.
+					// Пользователь заплатил фиксированный тариф и здесь не участвует.
+					for (const uid of [isHot ? userId : HOT_WALLET_USER_ID]) {
 						const r = await db.query(
 							`UPDATE balances SET balance = balance - $1::numeric, available = available - $1::numeric, updated_at = NOW()
 							  WHERE user_id = $2::int AND currency = 'lbtc'`,
@@ -541,7 +696,7 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 					    SET status = 'completed',
 					    tx_hash = $2,
 					    network_fee = $3::numeric,
-					    fee = $3::numeric + $4::numeric,
+					    fee = $4::numeric,
 					    updated_at = NOW()
 					  WHERE id = $1::int`,
 					[withdrawalId, txid, paidFee, exchangeFee]
@@ -549,7 +704,17 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 				await db.query(
 					`INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, tx_hash, address, network, metadata, created_at, updated_at)
 					 VALUES ($1::int, 'withdrawal', $2::numeric, 'lbtc', 'completed', $3::numeric, 'lbtc', 'On-chain LBTC withdrawal', $4, $5, 'lbtc', '{}', NOW(), NOW())`,
-					[userId, amount, paidFee + exchangeFee, txid, address]
+					[userId, amount, exchangeFee, txid, address]
+				);
+				// Учёт комиссии (задание): начисленный доход биржи (EXCHANGE_FEE) и
+				// фактический сетевой расход (NETWORK_FEE) пишутся отдельными
+				// строками. FEE_SWEEP позже переносит накопленный доход на
+				// fee-кошелёк — это внутреннее перемещение, а не новый доход.
+				await db.query(
+					`INSERT INTO fee_ledger (withdrawal_id, type, amount, currency, txid, status, note)
+					 VALUES ($1::int, 'NETWORK_FEE', $2::numeric, 'lbtc', $4, 'recorded', 'LBTC withdrawal network fee'),
+					        ($1::int, 'EXCHANGE_FEE', $3::numeric, 'lbtc', $4, 'recorded', 'LBTC withdrawal exchange commission')`,
+					[withdrawalId, paidFee, exchangeFee, txid]
 				);
 				// Deliberately no balances -> user_wallets mirror here. That mirror wrote
 				// a user's entire wallet set to one value, and on 2026-09-27 it stamped
@@ -567,6 +732,27 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 				await new Promise((r) => setTimeout(r, 250 * attempt));
 			}
 		}
+		if (ledgerErr) {
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'ledger',
+				eventType: 'record',
+				status: 'error',
+				errorCode: 'ledger_write_failed',
+				errorMessage: ledgerErr.message,
+				txid,
+				details: { userId, amount, currency: COIN_SYMBOL }
+			});
+		} else {
+			await recordWithdrawalEvent(db, {
+				withdrawalId,
+				stage: 'ledger',
+				eventType: 'record',
+				status: 'ok',
+				txid,
+				details: { userId, amount, paidFee, exchangeFee, currency: COIN_SYMBOL }
+			});
+		}
 		await db.end().catch(() => {});
 		if (ledgerErr) {
 			// Do not throw: the payout is on chain. The withdrawal row is still
@@ -576,12 +762,12 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 			);
 		}
 
-		// `fee` is what the user was actually charged, so the success response
-		// cannot quietly under-report it: the controller passes this straight
-		// back to the client, and returning the network fee alone would tell
-		// them 0.0002 after debiting 0.0102 — and would contradict the 0.01 that
-		// GET /withdrawal/fee/lbtc already quoted. The breakdown rides along so
-		// the UI can show where the fee went.
+		// `fee` is what the user was actually charged: the single exchange
+		// commission. The user does not pay the network fee separately — the
+		// exchange covers it from this tariff — so `network_fee` rides along as
+		// information for the ledger/UI and is NOT part of `fee`. Returning
+		// `amount + networkFee` here would contradict the 0.02 that
+		// GET /withdrawal/fee/lbtc already quoted.
 		const settled = buildWithdrawalFees({
 			amount,
 			withdrawalFee: exchangeFee,
@@ -589,7 +775,7 @@ const performWithdrawal = async (userId, address, currency, amount, opts = {
 		});
 		return {
 			transaction_id: txid,
-			fee: settled.settledTotalFee,
+			fee: settled.exchangeFee,
 			network_fee: settled.settledNetworkFee,
 			exchange_fee: settled.exchangeFee
 		};

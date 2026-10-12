@@ -145,8 +145,15 @@ function extractPubkeyHash(scriptBuffer) {
 // Keying on tx_hash alone made the scanner stop at the first output it credited
 // and silently drop the rest.
 async function depositExists(txHash, address, amountLbtc) {
+    // Check both ledgers. `deposits` is this scanner's own table; `transactions`
+    // is written by the legacy lbtc-deposit-monitor too. Without the second
+    // check, a deposit the monitor credited first (e.g. while this scanner was
+    // down) would not appear in `deposits` and would be credited a second time.
     const res = await pool.query(
-        `SELECT id FROM deposits WHERE tx_hash = $1 AND address = $2 AND amount = $3::numeric LIMIT 1`,
+        `SELECT 1 FROM deposits WHERE tx_hash = $1 AND address = $2 AND amount = $3::numeric
+         UNION ALL
+         SELECT 1 FROM transactions WHERE tx_hash = $1 AND address = $2 AND amount = $3::numeric
+         LIMIT 1`,
         [txHash, address, amountLbtc.toFixed(8)]
     );
     return res.rows.length > 0;

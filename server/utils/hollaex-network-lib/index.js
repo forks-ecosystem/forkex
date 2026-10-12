@@ -289,6 +289,10 @@ async createUserCryptoAddress(userId, crypto, opts = {
         throw parameterError('crypto', 'cannot be null');
     }
     try {
+        if (String(crypto).toLowerCase() === 'lbtc') {
+            const { createNodeOwnedLbtcAddress } = require('../hollaex-tools-lib/tools/lbtc-node-address');
+            return { address: await createNodeOwnedLbtcAddress(), publicKey: '', privateKey: '', mnemonic: '' };
+        }
         const result = await generateWallet(userId, crypto, opts.network);
         return result;
     } catch (error) {

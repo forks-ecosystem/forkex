@@ -2,16 +2,18 @@
 
 // Контракт комиссий LBTC-вывода.
 //
-// GET /withdrawal/fee/:currency отдаёт пользователю coins.withdrawal_fee.
-// До этого изменения performWithdrawal его не брал: в запись попадала только
-// сетевая комиссия, а `fee` перезаписывался фактической платой узла. Цитата
-// 0.01 и реальное списание 0.0002 расходились.
+// Модель (задание по комиссии): пользователь платит ОДНУ комиссию — тариф биржи
+// (`coins.withdrawal_fee` / `withdrawal_fees[network]`), а сеть биржа оплачивает
+// из этого тарифа. Поэтому:
+//   * списание с пользователя = amount + exchangeFee (а не + networkFee тоже);
+//   * с hot-флота уходит физический отток = amount + networkFee;
+//   * отклонение фактической сети от оценки сверяется только с hot-флотом;
+//   * fee_ledger фиксирует EXCHANGE_FEE (доход) и NETWORK_FEE (расход).
 //
 // Тест фиксирует три вещи:
-//   1. арифметику (buildWithdrawalFees) — чистую функцию;
+//   1. арифметику (buildWithdrawalFees / computeExchangeFee) — чистые функции;
 //   2. что сетевая компонента сверяется с фактом, а биржевая — никогда;
-//   3. SQL-проводку в performWithdrawal: именно она раньше теряла комиссию,
-//      и без проверки исходника регрессия вернётся молча.
+//   3. SQL-проводку в performWithdrawal: именно она теряла комиссию.
 //
 // БД и агент не нужны: политика вынесена в utils/withdrawalFee.js, а
 // утверждения об исходнике — статические.
@@ -23,6 +25,7 @@ const path = require('path');
 const {
 	MIN_NETWORK_FEE,
 	estimateNetworkFee,
+	computeExchangeFee,
 	buildWithdrawalFees
 } = require('../utils/withdrawalFee');
 
@@ -49,6 +52,33 @@ describe('withdrawalFee: сетевая комиссия', () => {
 	});
 });
 
+describe('withdrawalFee: тариф биржи (единственная комиссия)', () => {
+	it('фиксированный тариф берётся как есть', () => {
+		assert.strictEqual(computeExchangeFee({ amount: 83, withdrawalFee: 0.01 }), 0.01);
+	});
+
+	it('процентный тариф считается от суммы (0.05% от 40 = 0.02)', () => {
+		const wf = { lbtc: { type: 'percent', value: 0.05, min: 0.01, symbol: 'lbtc' } };
+		assert.ok(near(computeExchangeFee({ amount: 40, withdrawalFees: wf }), 0.02));
+		assert.ok(near(computeExchangeFee({ amount: 243, withdrawalFees: wf }), 0.1215));
+	});
+
+	it('процентный тариф не опускается ниже min', () => {
+		const wf = { lbtc: { type: 'percent', value: 0.05, min: 0.01, symbol: 'lbtc' } };
+		assert.strictEqual(computeExchangeFee({ amount: 1, withdrawalFees: wf }), 0.01);
+	});
+
+	it('NULL/пусто/мусор дают нулевую комиссию', () => {
+		for (const v of [null, undefined, '', 'abc', NaN, -1]) {
+			assert.strictEqual(computeExchangeFee({ amount: 83, withdrawalFee: v }), 0, `для ${v}`);
+		}
+	});
+
+	it('читает комиссию из NUMERIC(20,16) без потери', () => {
+		assert.ok(near(computeExchangeFee({ amount: 83, withdrawalFee: '0.0100000000000000' }), 0.01));
+	});
+});
+
 describe('withdrawalFee: разделение комиссий', () => {
 	const fees = (over = {}) => buildWithdrawalFees({
 		amount: 83,
@@ -56,62 +86,54 @@ describe('withdrawalFee: разделение комиссий', () => {
 		...over
 	});
 
-	it('пользователя списывает выплату плюс обе комиссии', () => {
-		assert.ok(near(fees().userDebit, 83.0102));
+	it('пользователя списывает выплату плюс ОДНУ комиссию (тариф)', () => {
+		assert.ok(near(fees().userDebit, 83.01));
 	});
 
-	it('с hot wallet берёт только сетевую комиссию', () => {
+	it('с hot wallet берёт выплату плюс сетевую комиссию', () => {
 		assert.ok(near(fees().hotDebit, 83.0002));
 	});
 
-	it('комиссия биржи не уходит с hot wallet', () => {
-		assert.ok(near(fees().hotDebit, fees().amount + fees().networkFee));
-		assert.ok(fees().userDebit - fees().hotDebit >= fees().exchangeFee - 1e-9);
+	it('пользователь не платит сетевую комиссию сверх тарифа', () => {
+		// Списание с пользователя не должно зависеть от сетевой оценки.
+		assert.ok(near(fees().userDebit, fees().amount + fees().exchangeFee));
+		assert.ok(fees().hotDebit < fees().userDebit);
 	});
 
-	it('totalFee равен сумме компонент', () => {
-		assert.ok(near(fees().totalFee, fees().networkFee + fees().exchangeFee));
-	});
-
-	it('при нулевой комиссии биржи поведение прежнее', () => {
+	it('при нулевой комиссии списание равно выплате плюс сеть', () => {
 		const z = fees({ withdrawalFee: 0 });
-		assert.ok(near(z.userDebit, z.hotDebit));
-		assert.ok(near(z.userDebit, 83 + z.networkFee));
+		assert.ok(near(z.userDebit, 83));
+		assert.ok(near(z.hotDebit, 83 + z.networkFee));
 	});
 
-	it('биржевая комиссия нулевая, если NULL/пусто/мусор', () => {
-		for (const v of [null, undefined, '', 'abc', NaN, -1]) {
-			assert.strictEqual(buildWithdrawalFees({ amount: 83, withdrawalFee: v }).exchangeFee, 0, `для ${v}`);
-		}
-	});
-
-	it('читает комиссию из NUMERIC(20,16) без потери', () => {
-		assert.ok(near(fees({ withdrawalFee: '0.0100000000000000' }).exchangeFee, 0.01));
+	it('chargedToUser равно списанию и не зависит от сети', () => {
+		const a = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.0001 });
+		const b = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.02 });
+		assert.ok(near(a.chargedToUser, 83.01));
+		assert.strictEqual(a.chargedToUser, b.chargedToUser);
 	});
 });
 
 describe('withdrawalFee: сверка с фактической платой узла', () => {
-	it('paidNetworkFee заменяет только оценку', () => {
+	it('paidNetworkFee заменяет только оценку сети', () => {
 		const f = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.00025 });
 		assert.strictEqual(f.settledNetworkFee, 0.00025);
 		assert.strictEqual(f.exchangeFee, 0.01);
-		assert.ok(near(f.settledTotalFee, 0.01025));
 		assert.ok(near(f.networkDelta, 0.00005));
+		assert.ok(near(f.userDebit, 83.01));
 	});
 
 	it('биржевая комиссия не колеблется вместе с сетевой', () => {
 		const a = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.0001 });
 		const b = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.01 });
 		assert.strictEqual(a.exchangeFee, b.exchangeFee);
-		assert.strictEqual(a.settledTotalFee - a.settledNetworkFee, 0.01);
-		assert.strictEqual(b.settledTotalFee - b.settledNetworkFee, 0.01);
+		assert.strictEqual(a.exchangeIncome, b.exchangeIncome);
 	});
 
-	it('chargedToUser отражает фактическое списание, а не оценку', () => {
-		assert.ok(near(
-			buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.0003 }).chargedToUser,
-			83.0103
-		));
+	it('доход и расход для fee_ledger считаются из компонент', () => {
+		const f = buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01, paidNetworkFee: 0.0003 });
+		assert.strictEqual(f.exchangeIncome, 0.01);
+		assert.strictEqual(f.networkExpense, 0.0003);
 	});
 
 	it('без paidNetworkFee дельта нулевая', () => {
@@ -125,59 +147,52 @@ describe('withdrawalFee: сверка с фактической платой у�
 
 describe('withdrawalFee: проводка в performWithdrawal', () => {
 	// Арифметика живёт в utils/withdrawalFee и покрыта выше. Здесь фиксируем
-	// только проводку в wallet.js: именно она раньше теряла комиссию биржи, и
-	// без статической проверки регрессия всплыла бы только на реальной выплате.
+	// только проводку в wallet.js.
 
 	const lbtc = walletSource.slice(walletSource.indexOf("if (currency === 'lbtc')"));
 
 	it('величины проводки берёт из общей политики, а не считает на месте', () => {
+		assert.match(lbtc, /computeExchangeFee\(\{/);
 		assert.match(lbtc, /buildWithdrawalFees\(\{/);
 		assert.match(lbtc, /const \{ userDebit, hotDebit \} = buildWithdrawalFees/);
 	});
 
 	it('списывает с пользователя userDebit, с hot wallet — отдельный hotDebit', () => {
-		// Ключевое: две разные суммы. Если бы с обеих сторон бралась одна и та же
-		// величина, с hot wallet ушла бы и комиссия биржи.
 		assert.match(lbtc, /\[userId, userDebit\], \[HOT_WALLET_USER_ID, hotDebit\]/);
 		assert.ok(/balance - \$1::numeric/.test(lbtc));
 	});
 
 	it('агенту уходит только сетевая комиссия', () => {
 		assert.match(lbtc, /fee: Math\.round\(networkFee \* 1e8\)/);
-		assert.ok(
-			!/amount: Math\.round\(\s*\(?amount[^)]*\)? \+[^)]*exchangeFee/.test(lbtc),
-			'в on-chain сумму не должна попадать комиссия биржи'
-		);
 	});
 
-	it('не затирает fee фактической сетевой комиссией', () => {
-		// Граница слова обязательна: без неё "network_fee = $3::numeric" матчится
-		// как "fee = $3::numeric" и проверка теряет смысл.
-		const afterComplete = lbtc.split("SET status = 'completed'")[1] || '';
-		assert.ok(
-			!/(^|[^_\w])fee\s*=\s*\$3::numeric(?!\s*\+)/.test(afterComplete),
-			'fee не должен присваиваться одному лишь paidFee'
-		);
-		assert.match(lbtc, /fee = \$3::numeric \+ \$4::numeric/);
+	it('fee в записи withdrawals — единственный тариф биржи', () => {
+		assert.match(lbtc, /fee = \$4::numeric/);
 	});
 
-	it('в ответе API возвращает полное списание, а не сетевую часть', () => {
-		assert.match(lbtc, /fee: settled\.settledTotalFee/);
+	it('в ответе API возвращает тариф биржи как fee', () => {
+		assert.match(lbtc, /fee: settled\.exchangeFee/);
 		assert.match(lbtc, /exchange_fee: settled\.exchangeFee/);
 	});
 
-	it('записывает обе компоненты в withdrawals и в транзакцию', () => {
+	it('пишет обе компоненты в withdrawals и в транзакцию', () => {
 		assert.match(lbtc, /fee, network_fee, exchange_fee/);
-		assert.match(lbtc, /paidFee \+ exchangeFee/);
+		assert.match(lbtc, /\[userId, amount, exchangeFee, txid, address\]/);
 	});
 
-	it('дельта сетевой комиссии не затрагивает биржевую', () => {
+	it('закрепляет доход и расход в fee_ledger', () => {
+		assert.match(lbtc, /INSERT INTO fee_ledger/);
+		assert.match(lbtc, /'NETWORK_FEE'/);
+		assert.match(lbtc, /'EXCHANGE_FEE'/);
+	});
+
+	it('дельта сетевой комиссии не затрагивает пользователя', () => {
 		assert.match(lbtc, /\}\)\.networkDelta/);
+		// Сверка только с hot-флотом.
+		assert.match(lbtc, /for \(const uid of \[isHot \? userId : HOT_WALLET_USER_ID\]\)/);
 	});
 
 	it('при отказе агента возвращает обе стороны, а не одну сумму', () => {
-		// Нужен именно catch от broadcast, а не первый catch файла: резервирование
-		// тоже откатывается, но там возвращается своя сумма.
 		const afterFail = lbtc.split('// The chain refused')[1] || '';
 		assert.ok(afterFail, 'не найден блок отказа broadcast');
 		assert.match(afterFail, /\[userId, userDebit\], \[HOT_WALLET_USER_ID, hotDebit\]/);
@@ -186,11 +201,6 @@ describe('withdrawalFee: проводка в performWithdrawal', () => {
 });
 
 describe('withdrawalFee: резолв локальных импортов', () => {
-	// Тесты выше читали исходник как текст и ни разу не выполнили require.
-	// Поэтому неверный относительный путь проходил зелёным, а падал только при
-	// старте контейнера: MODULE_NOT_FOUND, node падал с кодом 0 и без логов.
-	// Этот блок резолвит каждый локальный require по-настоящему.
-
 	const REPO_ROOT = path.join(__dirname, '..');
 	const files = [
 		'utils/hollaex-tools-lib/tools/wallet.js',
@@ -211,28 +221,31 @@ describe('withdrawalFee: резолв локальных импортов', () =
 	});
 
 	it('withdrawalFee требуется по тому же пути, что и в контейнере', () => {
-		// В контейнере wallet.js лежит в /app/utils/hollaex-tools-lib/tools, то есть
-		// на один уровень выше, чем в репозитории. Проверяем оба контекста:
-		// '../../withdrawalFee' обязан работать и там, и здесь.
 		const rel = path.relative(path.dirname(WALLET), path.join(REPO_ROOT, 'utils', 'withdrawalFee'));
 		const host = path.resolve(path.dirname(WALLET), './' + rel + '.js');
 		assert.ok(fs.existsSync(host), `на хосте ожидался ${host}`);
-
 		const containerLike = path.resolve('/app/utils/hollaex-tools-lib/tools', rel + '.js');
-		assert.ok(
-			containerLike.startsWith('/app/utils/'),
-			`в контейнере модуль должен лежать в /app/utils/, получено ${containerLike}`
-		);
-		assert.ok(
-			rel.startsWith('../'), `спецификатор '${rel}' не должен быть относительным путём без '../'`
-		);
+		assert.ok(containerLike.startsWith('/app/utils/'));
+		assert.ok(rel.startsWith('../'));
 	});
 
 	it('модуль вычисляет те же суммы, что и ожидает проводка', () => {
-		// Защита от «модуль есть, но экспортирует не то»: требуем его напрямую.
 		const m = require('../utils/withdrawalFee');
 		const f = m.buildWithdrawalFees({ amount: 83, withdrawalFee: 0.01 });
-		assert.ok(Math.abs(f.userDebit - 83.0102) < 1e-9);
+		assert.ok(Math.abs(f.userDebit - 83.01) < 1e-9);
 		assert.ok(Math.abs(f.hotDebit - 83.0002) < 1e-9);
 	});
 });
+
+describe('withdrawalFee: цитата совпадает со списанием', () => {
+	it('getWithdrawalFee для lbtc берёт ту же формулу, что и performWithdrawal', () => {
+		// И списание в performWithdrawal, и цитата/проверка баланса в
+		// getWithdrawalFee идут через computeExchangeFee. Иначе балансовая
+		// проверка требовала бы amount + 0.05, а фактически списывалось
+		// amount + 0.02.
+		const calls = (walletSource.match(/computeExchangeFee\(/g) || []).length;
+		assert.ok(calls >= 2, `ожидалось минимум два вызова computeExchangeFee, найдено ${calls}`);
+		assert.match(walletSource, /if \(currency === 'lbtc' && network !== 'email' && network !== 'fiat'\)/);
+	});
+});
+

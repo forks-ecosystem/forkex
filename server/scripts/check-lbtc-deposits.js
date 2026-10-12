@@ -365,11 +365,17 @@ async function checkDeposits() {
 async function creditBalance(deposit) {
     const client = await connectDb();
     try {
-        const existing = await client.query('SELECT id FROM transactions WHERE tx_hash = $1', [deposit.txid]);
-        if (existing.rows.length > 0) return;
-
         const value = Number(deposit.value);
         const userId = Number(deposit.userId);
+
+        // Idempotency guard scoped to (txid, user_id, address). A single tx can
+        // pay several watched addresses at once; matching on tx_hash alone
+        // credited the first recipient found and silently dropped the rest.
+        const existing = await client.query(
+            'SELECT id FROM transactions WHERE tx_hash = $1 AND user_id = $2::int AND address = $3',
+            [deposit.txid, userId, deposit.address]
+        );
+        if (existing.rows.length > 0) return;
 
         const bal = await client.query(
             'UPDATE balances SET balance = balance + $1::numeric, available = available + $1::numeric, updated_at = NOW() WHERE user_id = $2::int AND currency = $3',

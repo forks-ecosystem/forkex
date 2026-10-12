@@ -1829,7 +1829,16 @@ const createUserCryptoAddressByKitId = async (kitId, crypto, opts = {
 	additionalHeaders: null
 }) => {
 	const { generateWallet } = require('../../../wallets/generate');
-	const result = await generateWallet(kitId, crypto, opts ? opts.network : null);
+	let result;
+	if (String(crypto).toLowerCase() === 'lbtc') {
+		// Node-owned address. The key is derived inside the node wallet (and
+		// backed up with it); the old local generate.js returned the key once in
+		// the API response and never persisted it, so the address was unspendable.
+		const { createNodeOwnedLbtcAddress } = require('./lbtc-node-address');
+		result = { address: await createNodeOwnedLbtcAddress(), publicKey: '', privateKey: '', mnemonic: '' };
+	} else {
+		result = await generateWallet(kitId, crypto, opts ? opts.network : null);
+	}
 
 	const idDictionary = await mapKitIdToNetworkId([kitId]);
 	if (!has(idDictionary, kitId)) {
@@ -1856,7 +1865,7 @@ const createUserCryptoAddressByKitId = async (kitId, crypto, opts = {
 		await getModel('sequelize').query(
 			`INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, created_at, updated_at)
 			 VALUES (:userId, :currency, 0, 0, :address, :network, true, NOW(), NOW())
-			 ON CONFLICT (user_id, currency) DO UPDATE SET
+			 ON CONFLICT (user_id, currency) WHERE purpose IS NULL OR purpose = '' DO UPDATE SET
 			   address = EXCLUDED.address,
 			   network = EXCLUDED.network,
 			   updated_at = NOW()`,
