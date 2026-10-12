@@ -1944,7 +1944,7 @@
 		"SELECT_NETWORK": "Select network:",
 		"DESTINATION": "Destination:",
 		"AMOUNT": "Amount:",
-		"ESTIMATED": "Estimated Withdrawal value",
+		"ESTIMATED": "Total to be debited",
 		"TRANSACTION_FEE": "Transaction fee to be added:",
 		"SCAN": "SCAN",
 		"ADDRESS": "address:",

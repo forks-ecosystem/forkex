@@ -129,17 +129,14 @@ const RenderWithdraw = ({
 			? coins[getWithdrawCurrency]?.network
 			: coins[getWithdrawCurrency]?.symbol;
 
-	const curretPrice = getWithdrawCurrency
-		? prices[getWithdrawCurrency]
-		: prices[defaultCurrency];
-	const estimatedWithdrawValue = curretPrice * getWithdrawAmount || 0;
 	let fee =
 		selectedMethod === STRINGS['FORM_FIELDS.EMAIL_LABEL']
 			? 0
 			: calculateFee(
 					selectedAsset?.selectedCurrency,
 					getWithdrawNetworkOptions,
-					coins
+					coins,
+					getWithdrawAmount
 			  );
 	const feeCoin = calculateFeeCoin(
 		selectedAsset?.selectedCurrency,
@@ -706,11 +703,11 @@ const RenderWithdraw = ({
 					(getWithdrawCurrency || currency) && feeCoin?.toUpperCase()
 			  }`;
 
-	const incrementUnit = coins[BASE_CURRENCY]?.increment_unit || 0.0001;
-	const decimalPoint = new BigNumber(incrementUnit).dp();
-	const estimatedFormat = `≈ ${new BigNumber(estimatedWithdrawValue)
-		.decimalPlaces(decimalPoint)
-		.toNumber()} ${BASE_CURRENCY?.toUpperCase()}`;
+	const totalDebitFormat = `${new BigNumber(getWithdrawAmount || 0)
+		.plus(fee || 0)
+		.toNumber()} ${
+		(getWithdrawCurrency || currency) && feeCoin?.toUpperCase()
+	}`;
 
 	const isCondition =
 		(['xrp', 'xlm'].includes(selectedAsset?.selectedCurrency) ||
@@ -1603,9 +1600,8 @@ const RenderWithdraw = ({
 												{renderEstimatedValueAndFee(
 													renderLabel,
 													'ACCORDIAN.ESTIMATED',
-													estimatedFormat
+													totalDebitFormat
 												)}
-												<span>--</span>
 												{renderEstimatedValueAndFee(
 													renderLabel,
 													'ACCORDIAN.TRANSACTION_FEE',

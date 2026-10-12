@@ -98,29 +98,50 @@ export const renderEstimatedValueAndFee = (
 	);
 };
 
+// Selects the fee descriptor for the chosen network, falling back to the only
+// configured network and finally to the legacy flat `withdrawal_fee`.
+const selectFeeDescriptor = (selectedAsset, network, coins) => {
+	const fees = selectedAsset && coins?.[selectedAsset]?.withdrawal_fees;
+	if (fees && Object.keys(fees).length) {
+		return fees[network] || fees[Object.keys(fees)[0]] || null;
+	}
+	const flat = selectedAsset && coins?.[selectedAsset]?.withdrawal_fee;
+	return flat !== undefined && flat !== null
+		? { value: flat, type: 'fixed' }
+		: null;
+};
+
+// Applies the descriptor's pricing model. A "percent" rate is taken against the
+// requested amount and floored at `min`; a "fixed" fee is floored at `min`. With
+// no model (a bare `value`, all non-lbtc coins today) the raw value is returned
+// unchanged. The amount is optional: callers that only render a network label
+// get the minimum, which is the honest "from" figure.
+const applyFeeModel = (descriptor, amount) => {
+	if (!descriptor) return 0;
+	const value = new BigNumber(descriptor.value || 0);
+	const min = new BigNumber(descriptor.min || 0);
+	if (descriptor.type === 'percent') {
+		return BigNumber.max(
+			min,
+			new BigNumber(amount || 0).times(value).div(100)
+		).toNumber();
+	}
+	if (descriptor.type === 'fixed') {
+		return BigNumber.max(min, value).toNumber();
+	}
+	return value.toNumber();
+};
+
 export const calculateFee = (
 	selectedAsset,
 	getWithdrawNetworkOptions,
-	coins
-) => {
-	return selectedAsset &&
-		coins[selectedAsset].withdrawal_fees &&
-		Object.keys(coins[selectedAsset]?.withdrawal_fees).length &&
-		coins[selectedAsset].withdrawal_fees[getWithdrawNetworkOptions]?.value
-		? coins[selectedAsset].withdrawal_fees[getWithdrawNetworkOptions]?.value
-		: selectedAsset &&
-		  coins[selectedAsset].withdrawal_fees &&
-		  Object.keys(coins[selectedAsset]?.withdrawal_fees).length &&
-		  coins[selectedAsset].withdrawal_fees[
-				Object.keys(coins[selectedAsset]?.withdrawal_fees)[0]
-		  ]?.value
-		? coins[selectedAsset].withdrawal_fees[
-				Object.keys(coins[selectedAsset]?.withdrawal_fees)[0]
-		  ]?.value
-		: selectedAsset && coins[selectedAsset].withdrawal_fee
-		? coins[selectedAsset]?.withdrawal_fee
-		: 0;
-};
+	coins,
+	amount
+) =>
+	applyFeeModel(
+		selectFeeDescriptor(selectedAsset, getWithdrawNetworkOptions, coins),
+		amount
+	);
 
 export const calculateFeeMarkup = (
 	selectedAsset,
@@ -128,24 +149,10 @@ export const calculateFeeMarkup = (
 	coins,
 	coin_customizations
 ) => {
-	let fee =
-		selectedAsset &&
-		coins[selectedAsset].withdrawal_fees &&
-		Object.keys(coins[selectedAsset]?.withdrawal_fees).length &&
-		coins[selectedAsset].withdrawal_fees[getWithdrawNetworkOptions]?.value
-			? coins[selectedAsset].withdrawal_fees[getWithdrawNetworkOptions]?.value
-			: selectedAsset &&
-			  coins[selectedAsset].withdrawal_fees &&
-			  Object.keys(coins[selectedAsset]?.withdrawal_fees).length &&
-			  coins[selectedAsset].withdrawal_fees[
-					Object.keys(coins[selectedAsset]?.withdrawal_fees)[0]
-			  ]?.value
-			? coins[selectedAsset].withdrawal_fees[
-					Object.keys(coins[selectedAsset]?.withdrawal_fees)[0]
-			  ]?.value
-			: selectedAsset && coins[selectedAsset].withdrawal_fee
-			? coins[selectedAsset]?.withdrawal_fee
-			: 0;
+	let fee = applyFeeModel(
+		selectFeeDescriptor(selectedAsset, getWithdrawNetworkOptions, coins),
+		undefined
+	);
 
 	const feeMarkup =
 		selectedAsset &&
