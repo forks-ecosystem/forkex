@@ -95,3 +95,10 @@ bot/internal/**/tmp/
 
 # runtime logs
 server/scripts/logs/
+server/scripts/*.log
+wallet-scanner/*.log
+
+# LBTC ops artifacts (backups, one-off markers)
+server/scripts/*.bak-*
+server/db/*.bak-*
+server/scripts/.fx-reconcile-state
