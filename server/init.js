@@ -260,8 +260,10 @@ const checkStatus = () => {
 					}
 				}
 
-				const adminRole = roles.find((r) => r.role_name === 'admin');
-				if (adminRole) {
+				for (const roleName of ['admin', 'operator']) {
+					const adminRole = roles.find((r) => r.role_name === roleName);
+					if (!adminRole) continue;
+
 					const existingPermissions = Array.isArray(adminRole.permissions) ? adminRole.permissions : [];
 					const missingPermissions = adminEndpointsList.filter((ep) => !existingPermissions.includes(ep));
 
@@ -275,13 +277,13 @@ const checkStatus = () => {
 					let changed = false;
 					if (missingPermissions.length > 0) {
 						adminRole.set('permissions', [...existingPermissions, ...missingPermissions]);
-						loggerInit.info('init/checkStatus/permissions', `added ${missingPermissions.length} new admin permissions`);
+						loggerInit.info('init/checkStatus/permissions', `added ${missingPermissions.length} new admin permissions for ${roleName}`);
 						changed = true;
 					}
 
 					if (missingConfigs.length > 0) {
 						adminRole.set('configs', [...existingConfigs, ...missingConfigs]);
-						loggerInit.info('init/checkStatus/configs', `added ${missingConfigs.length} new admin configs`);
+						loggerInit.info('init/checkStatus/configs', `added ${missingConfigs.length} new admin configs for ${roleName}`);
 						changed = true;
 					}
 
