@@ -144,49 +144,67 @@ function extractPubkeyHash(scriptBuffer) {
 // chain data has both: tx b25e8dc7 pays LSUsrwZW... 151.9995 and 0.0001).
 // Keying on tx_hash alone made the scanner stop at the first output it credited
 // and silently drop the rest.
-async function depositExists(txHash, address, amountLbtc) {
-    // Check both ledgers. `deposits` is this scanner's own table; `transactions`
-    // is written by the legacy lbtc-deposit-monitor too. Without the second
-    // check, a deposit the monitor credited first (e.g. while this scanner was
-    // down) would not appear in `deposits` and would be credited a second time.
+async function depositExists(txHash, address, amountLbtc, vout) {
+    // Check every ledger. `lbtc_deposit_holds` is the pending-deposit ledger
+    // owned by the monitor (it drives the collect), `deposits` is the history
+    // table, `transactions` is the ledger. Without all three, a deposit the
+    // monitor journaled first (e.g. while this scanner was down) would be
+    // journaled a second time.
+    //
+    // The hold is matched on the output index: one transaction can pay the
+    // same address twice, and the output is what identifies the deposit.
     const res = await pool.query(
-        `SELECT 1 FROM deposits WHERE tx_hash = $1 AND address = $2 AND amount = $3::numeric
+        `SELECT 1 FROM lbtc_deposit_holds WHERE deposit_tx = $1 AND address = $2 AND vout = $3
          UNION ALL
-         SELECT 1 FROM transactions WHERE tx_hash = $1 AND address = $2 AND amount = $3::numeric
+         SELECT 1 FROM deposits WHERE tx_hash = $1 AND address = $2 AND amount = $4::numeric
+         UNION ALL
+         SELECT 1 FROM transactions WHERE tx_hash = $1 AND address = $2 AND amount = $4::numeric AND type = 'deposit'
          LIMIT 1`,
-        [txHash, address, amountLbtc.toFixed(8)]
+        [txHash, address, vout, amountLbtc.toFixed(8)]
     );
     return res.rows.length > 0;
 }
 
-async function createDeposit(userId, coinId, amount, txHash, address) {
+// Journal a deposit as PENDING. Nothing is credited here.
+//
+// A deposit only counts once it has been collected into the exchange float
+// (#1) and that collect is final on chain: until then the exchange does not
+// hold the coins, so the balance must not show them — the user would be able
+// to spend money the float does not have. The scanner is the fast detector,
+// so it only journals the deposit; the collect and the credit belong to the
+// monitor (server/scripts/check-lbtc-deposits.js), which owns the hold ledger.
+async function recordPendingDeposit(userId, coinId, amount, txHash, address, vout) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        // Hold ledger: one row per (deposit tx, address, output). The unique
+        // index makes this idempotent, so the scanner and the monitor can both
+        // see the same deposit without journaling it twice.
         await client.query(
-            `INSERT INTO deposits (user_id, coin_id, amount, status, tx_hash, address)
-             VALUES ($1, $2, $3, 'completed', $4, $5)`,
-            [userId, coinId, amount, txHash, address]
+            `INSERT INTO lbtc_deposit_holds (user_id, address, amount, deposit_tx, vout)
+             VALUES ($1, $2, $3::numeric, $4, $5)
+             ON CONFLICT DO NOTHING`,
+            [userId, address, amount.toFixed(8), txHash, vout]
         );
+        // Deposit history row. 'processing' until the collect is final, so the
+        // user sees the deposit as pending instead of as credited money.
         await client.query(
-            `UPDATE balances SET balance = balance + $1, available = available + $1, updated_at = NOW()
-             WHERE user_id = $2 AND currency = 'lbtc'`,
-            [amount, userId]
+            `INSERT INTO deposits (user_id, coin_id, amount, status, tx_hash, address, fee, created_at, updated_at)
+             VALUES ($1, $2, $3::numeric, 'processing', $4, $5, 0, NOW(), NOW())
+             ON CONFLICT DO NOTHING`,
+            [userId, coinId, amount.toFixed(8), txHash, address]
         );
+        // Ledger row. 'pending' until the collect is final.
         await client.query(
-            `UPDATE user_wallets SET balance = balance + $1, available = available + $1, updated_at = NOW()
-             WHERE user_id = $2 AND currency = 'lbtc'`,
-            [amount, userId]
-        );
-        await client.query(
-            `INSERT INTO transactions (user_id, type, amount, currency, status, description, tx_hash, address, network)
-             VALUES ($1, 'deposit', $2, 'lbtc', 'completed', 'LBTC deposit detected by wallet scanner', $3, $4, 'lbtc')`,
-            [userId, amount, txHash, address]
+            `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
+             VALUES ($1, 'deposit', $2::numeric, 'lbtc', 'pending', 0, '', 'On-chain LBTC deposit', NULL, $3, $4, 'lbtc', '{}', NOW(), NOW())
+             ON CONFLICT DO NOTHING`,
+            [userId, amount.toFixed(8), txHash, address]
         );
         await client.query('COMMIT');
-        console.log(`[Scanner] Deposit: user=${userId} ${amount} LBTC tx=${txHash.slice(0,20)}...`);
+        console.log(`[Scanner] Deposit pending: user=${userId} ${amount} LBTC tx=${txHash.slice(0, 20)}...`);
     } catch (e) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         throw e;
     } finally {
         client.release();
@@ -206,7 +224,8 @@ async function scanBlock(height) {
             continue;
         }
 
-        for (const out of tx.outs) {
+        for (let outIdx = 0; outIdx < tx.outs.length; outIdx++) {
+            const out = tx.outs[outIdx];
             const valueLbtc = Number(out.value) / 100000000;
             if (valueLbtc <= 0) continue;
 
@@ -216,10 +235,10 @@ async function scanBlock(height) {
             const user = knownAddresses.find(a => a.pubkey_hash === pubkeyHash);
             if (!user) continue;
 
-            if (await depositExists(txid, user.address, valueLbtc)) continue;
+            if (await depositExists(txid, user.address, valueLbtc, outIdx)) continue;
 
             try {
-                await createDeposit(user.user_id, 23, valueLbtc, txid, user.address);
+                await recordPendingDeposit(user.user_id, 23, valueLbtc, txid, user.address, outIdx);
                 depositsFound++;
             } catch (e) {
                 console.error(`[Scanner] Deposit failed tx=${txid.slice(0,20)}...: ${e.message}`);
