@@ -201,7 +201,8 @@ async function main() {
             });
             await db.query(
                 `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
-                 VALUES ($1::int, 'deposit', $2::numeric, $3, 'completed', 0, '', 'On-chain LBTC deposit (backfill)', NULL, $4, $5, 'lbtc', '{}', NOW(), NOW())`,
+                 VALUES ($1::int, 'deposit', $2::numeric, $3, 'completed', 0, '', 'On-chain LBTC deposit (backfill)', NULL, $4, $5, 'lbtc', '{}', NOW(), NOW())
+                 ON CONFLICT DO NOTHING`,
                 [d.user_id, v.value, CURRENCY, d.tx_hash, d.address]
             );
             // user_wallets mirrors the spendable on-chain balance of the address.

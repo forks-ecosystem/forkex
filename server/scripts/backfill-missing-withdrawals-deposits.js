@@ -64,9 +64,13 @@ const insertWithdrawal = `
   VALUES ($1::int, $2::int, $3::numeric, $4::numeric, 'completed', $5, $6, $7, $7)
   RETURNING id`;
 
+// A deposit is one transaction output: the unique index on
+// (tx_hash, coin_id, address, amount) makes the insert idempotent, so a row
+// that already exists is skipped instead of aborting the whole backfill.
 const insertDeposit = `
   INSERT INTO deposits (user_id, coin_id, amount, fee, status, address, tx_hash, created_at, updated_at)
   VALUES ($1::int, $2::int, $3::numeric, $4::numeric, 'completed', $5, $6, $7, $7)
+  ON CONFLICT DO NOTHING
   RETURNING id`;
 
 const main = async () => {
@@ -119,7 +123,11 @@ const main = async () => {
               r.user_id, r.coin_id, r.amount, r.fee || 0, r.address, r.tx_hash, r.created_at,
             ]);
             await db.query('COMMIT');
-            console.log(`  + deposits #${ins.rows[0].id}  tx=${r.transaction_id} user=${r.user_id} ${r.amount} ${r.symbol} ${r.tx_hash.slice(0, 16)}…`);
+            if (ins.rows.length === 0) {
+              console.log(`  = deposits already present  tx=${r.transaction_id} user=${r.user_id} ${r.amount} ${r.symbol} ${r.tx_hash.slice(0, 16)}…`);
+            } else {
+              console.log(`  + deposits #${ins.rows[0].id}  tx=${r.transaction_id} user=${r.user_id} ${r.amount} ${r.symbol} ${r.tx_hash.slice(0, 16)}…`);
+            }
           } catch (e) {
             await db.query('ROLLBACK');
             throw e;
