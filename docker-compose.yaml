@@ -33,7 +33,7 @@ services:
   # ─── Backend ───────────────────────────────────────────────
   api:
     container_name: forkex-api
-    image: forkex-api:v15
+    image: forkex-api:v22
     build:
       context: .
       dockerfile: Dockerfile
