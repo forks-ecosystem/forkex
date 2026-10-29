@@ -2285,34 +2285,34 @@ const getAllBalancesAdmin = async (opts = {
 	additionalHeaders: null
 }) => {
 
-	let network_id = null;
-	if (opts.user_id) {
-		// check mapKitIdToNetworkId
-		const idDictionary = await mapKitIdToNetworkId([opts.user_id]);
-		if (!has(idDictionary, opts.user_id)) {
+	// fork: the local balances table keeps kit user ids and network ids may be null,
+	// so balances are queried and returned by kit id without any network id remapping
+	const kit_id = opts.user_id || null;
+	if (kit_id) {
+		const user = await dbQuery.findOne('user', {
+			where: {
+				id: kit_id
+			},
+			attributes: [
+				'id'
+			]
+		});
+		if (!user) {
 			throw new Error(USER_NOT_FOUND);
-		} else if (!idDictionary[opts.user_id]) {
-			throw new Error(USER_NOT_REGISTERED_ON_NETWORK);
-		} else {
-			network_id = idDictionary[opts.user_id];
 		}
 	}
 
 	return getNodeLib().getBalances({
-		userId: network_id,
+		userId: kit_id,
 		currency: opts.currency,
 		format: (opts.format && (opts.format === 'csv' || opts.format === 'all')) ? 'all' : null, // for csv get all data,
 		additionalHeaders: opts.additionalHeaders
 	})
 		.then(async (balances) => {
 			if (balances.data.length > 0) {
-				const networkIds = balances.data.map((balance) => balance.user_id).filter(id => id);
-				const idDictionary = await mapNetworkIdToKitId(networkIds);
 				for (let balance of balances.data) {
-					const user_kit_id = idDictionary[balance.user_id];
-					balance.network_id = balance.user_id;
-					balance.user_id = user_kit_id;
-					if (balance.User) balance.User.id = user_kit_id;
+					balance.network_id = null;
+					if (balance.User) balance.User.id = balance.user_id;
 				}
 			}
 
