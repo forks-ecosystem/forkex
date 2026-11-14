@@ -1,45 +1,60 @@
-# HollaEx Kit [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-green.svg)](https://github.com/facebook/create-react-app/pulls)
-HollaEx Kit is an open source white label crypto software suite with a range of features from exchange and trading to user management and onboarding as well as wallet system. In order to run the HollaEx Kit, you need to run the Server as the back-end and Web as your front-end user interface. HollaEx Kit runs as a stand alone node and for trading and blockchain functionalities require to connect to HollaEx Network. By default the node connects to the public HollaEx Network.
+# ForkEx
 
-## Get Started
+ForkEx — криптобиржевой движок на базе [HollaEx Kit](https://github.com/hollaex/hollaex-kit) (white label платформа: биржа, трейдинг, управление пользователями, кошельковая система). Форк развёрнут как самостоятельный узел с локальным матчингом ордеров, собственной инфраструктурой кошельков (LBTC, USDT/ERC-20, Solana SPL) и торговым ботом.
 
-HollaEx Kit provides simple (but powerful) CLI tool to help exchange operators setup and operate the exchange. Get started by install HollaEx CLI and following the [documentation](https://docs.hollaex.com) to start your own exchange.
+Первоисточник проекта (upstream):
 
 ```
 git clone https://github.com/hollaex/hollaex-kit.git
-
-bash install.sh
 ```
-Read more on our [Docs](https://docs.hollaex.com)!
 
-## Developers
+## Состав
 
-Checkout [Web](https://github.com/hollaex/hollaex-kit/tree/master/web) for the front-end UI/UX code.
+| Компонент | Каталог | Назначение |
+|---|---|---|
+| API (back-end) | `server/` | Kit API: аккаунты, балансы, ордера, выводы, настройки |
+| Web (front-end) | `web/` | Пользовательский интерфейс биржи (React) |
+| WebSocket | `ws/` | Реалтайм-фиды: ордербук, сделки, балансы |
+| Plugins | `plugins/` | Хост плагинов Kit |
+| Affiliation | `affiliation/` | Реферальная программа |
+| Bot | `bot/` | Торговый бот на Go (маркет-мейкинг, внешние цены) |
+| Price Oracle | `price-oracle/` | Источник цен и анкоринг для бота |
+| Wallet Scanner | `wallet-scanner/` | Сканирование депозитов LBTC: журнал pending-холдов вместо прямого зачисления |
+| Order Tracker | `order-tracker/` | Трекинг ордеров |
+| State Anchor | `state-anchor/` | Анкоринг состояния |
+| Market Maker | `market-maker/` | Маркет-мейкинг утилиты |
 
-Check out [Server](https://github.com/hollaex/hollaex-kit/tree/master/server) for back-end and server side operations and endpoints.
+## Ключевые отличия от upstream
 
-Check out [Plugins](https://github.com/hollaex/hollaex-kit/tree/2.0-develop/server#plugins) for developing seamless and flexible custom services that can be added to the HollaEx Kit.
+- **Локальный матчинг-движок** — кросс-исполнение ордеров при создании, атомарные транзакции, maker/taker комиссии (не требуется HollaEx Network для исполнения).
+- **Кошельковая инфраструктура LBTC** (`server/scripts/`, `server/lib/lbtc-rpc.js`) — депозиты через wallet-scanner с холдами и зачислением после подтверждений, выводы через ноду, fee ledger и sweep депозитных адресов, синхронизация балансов с ledger, бэкфиллы.
+- **USDT (ERC-20, Ethereum mainnet)** — монитор депозитов `check-usdt-deposits.js` (eth_getLogs, зачисление после 12 подтверждений с проверкой receipt и защитой от реоргов), выводы `usdt-withdraw.js`, генерация адресов, sweep. Документация: [`server/scripts/README-usdt.md`](server/scripts/README-usdt.md).
+- **TRUMP (Solana SPL)** — поддержка генерации кошельков и отображения.
+- **RBAC** — роль оператора наряду с администратором.
+- **Комиссии на вывод по сетям** — per-network fee model, отображение полной суммы списания.
+- **Управление как единый стек** — `up.sh` и `docker-compose.yaml` поднимают postgres, redis, api, plugins, websocket, affiliation, web, nginx, bot, price-oracle в сети `forkex-network`.
 
-Check out [HollaEx CLI](https://github.com/hollaex/hollaex-cli) (Command Line Interface) for interacting and deploying your exchange.
+## Запуск
 
-Check out [HollaEx Network Library](https://github.com/hollaex/hollaex-kit/tree/master/server/utils/hollaex-network-lib) for tools and functions used to communicate with HollaEx Network.
+```
+./up.sh
+```
 
-Check out [HollaEx Tools Library](https://github.com/hollaex/hollaex-kit/tree/master/server/utils/hollaex-tools-lib) for developers as a suite of all useful functions in the HollaEx Kit.
+Скрипт останавливает старые контейнеры и поднимает стек через `docker compose -f docker-compose.yaml up -d`.
 
-## Community
-Join us on the [Forum](https://forum.hollaex.com), [Discord](https://discord.gg/RkRHU8RbyM) and [Twitter](http://www.twitter.com/hollaex).
+Конфигурация: `.env` (шаблон — `.env.example`), сетевые настройки nginx (`nginx/`), образы собираются через `Dockerfile*` в корне и каталогах компонентов.
 
+## Разработка
 
-<a href="https://github.com/hollaex/hollaex-kit/graphs/contributors">
-  <img src="https://contributors-img.web.app/image?repo=hollaex/hollaex-kit" />
-</a>
+- Web UI: `web/`
+- Сервер и эндпоинты: `server/`
+- Плагины Kit: `plugins/`
+- Библиотеки HollaEx (network-lib, tools-lib): `server/utils/`
+- Руководство по контрибьюции: [CONTRIBUTING.md](CONTRIBUTING.md)
 
+## Полезные ссылки (upstream)
 
-## Useful Links
-
-- Exchange Dashboard: https://dash.hollaex.com
-- HollaEx Whitepaper: https://whitepaper.hollaex.com
-- HollaEx Live Exchange: https://pro.hollaex.com/trade/xht-usdt
-- Discord Community: https://discord.gg/RkRHU8RbyM
-- Forum: https://forum.hollaex.com
-- Docs: https://docs.hollaex.com
+- Документация HollaEx: https://docs.hollaex.com
+- HollaEx CLI: https://github.com/hollaex/hollaex-cli
+- Форум: https://forum.hollaex.com
+- Discord: https://discord.gg/RkRHU8RbyM
