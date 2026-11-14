@@ -1,13 +1,13 @@
 # build environment
-FROM node:14.21.1-buster AS build
-ENV NODE_OPTIONS=--max_old_space_size=4096
+FROM node:24-bookworm-slim AS build
+ENV NODE_OPTIONS="--openssl-legacy-provider --max_old_space_size=4096"
 ENV GENERATE_SOURCEMAP=false
 ARG REACT_APP_DOMAIN=forkex.life
 ENV REACT_APP_DOMAIN=$REACT_APP_DOMAIN
 WORKDIR /app
 COPY package.json /app/package.json
 RUN npm install -g node-gyp && \
-    npm install --loglevel=error
+    npm install --legacy-peer-deps --loglevel=error
 COPY . /app
 RUN export REACT_APP_LAST_BUILD=$(date +"%Y-%m-%dT%H-%M-%S") && \
     npm run build && \

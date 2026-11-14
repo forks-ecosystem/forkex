@@ -57,13 +57,15 @@ function requireVar(name) {
     return v;
 }
 
-// Credentials for the node's JSON-RPC.
+// Node RPC host/port. Authorization lives in ./lbtc-rpc.js (chain:
+// .cookie -> these env credentials), so user/password are optional here and
+// exist only as the transition-safe fallback for that client.
 function rpcConfig() {
     return {
         host: process.env.LBTC_RPC_HOST || '127.0.0.1',
         port: Number(process.env.LBTC_RPC_PORT || 19556),
-        user: requireVar('LBTC_RPC_USER'),
-        password: requireVar('LBTC_RPC_PASSWORD')
+        user: process.env.LBTC_RPC_USER,
+        password: process.env.LBTC_RPC_PASSWORD
     };
 }
 

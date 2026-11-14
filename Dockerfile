@@ -1,9 +1,7 @@
-FROM node:20.19.0-bullseye-slim
+FROM node:24-bookworm-slim
 
-RUN rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list && \
-    echo "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list && \
-    apt-get update -o Acquire::Check-Valid-Until=false && \
-    apt-get install -y --no-install-recommends --allow-downgrades -o Acquire::Check-Valid-Until=false curl openssl ca-certificates git python build-essential perl-base=5.32.1-4+deb11u3 && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl openssl ca-certificates git python3 build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production

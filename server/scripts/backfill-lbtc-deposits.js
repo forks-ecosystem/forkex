@@ -19,42 +19,14 @@
 //   node backfill-lbtc-deposits.js           # dry run, no writes
 //   node backfill-lbtc-deposits.js --apply   # credit balances + ledger rows
 
-const http = require('http');
-const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
+const { dbConfig } = require('./lbtc-ops-env');
+const { rpc } = require('./lbtc-rpc');
 
-const RPC = rpcConfig();
 const CURRENCY = 'lbtc';
 const MIN_CONFIRMATIONS = 3;
 const APPLY = process.argv.includes('--apply');
 
 const DB_AUTH = dbConfig();
-
-let rpcId = 1;
-function rpc(method, params = []) {
-    return new Promise((resolve, reject) => {
-        const body = JSON.stringify({ jsonrpc: '1.0', id: rpcId++, method, params });
-        const req = http.request(
-            { host: RPC.host, port: RPC.port, method: 'POST', path: '/',
-              headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-              auth: `${RPC.user}:${RPC.password}`, timeout: 20000 },
-            (res) => {
-                let data = '';
-                res.on('data', (c) => (data += c));
-                res.on('end', () => {
-                    try {
-                        const parsed = JSON.parse(data);
-                        if (parsed.error) return reject(new Error(parsed.error.message));
-                        resolve(parsed.result);
-                    } catch (e) { reject(new Error('bad rpc json: ' + e.message)); }
-                });
-            }
-        );
-        req.on('timeout', () => req.destroy(new Error('rpc timeout')));
-        req.on('error', reject);
-        req.end(body);
-    });
-}
-
 
 async function connectDb() {
     const { Client } = require('pg');

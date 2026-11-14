@@ -1,7 +1,7 @@
 'use strict';
 
-const http = require('http');
-const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
+const { dbConfig } = require('./lbtc-ops-env');
+const { rpc } = require('./lbtc-rpc');
 const crypto = require('crypto');
 
 const CURRENCY = 'lbtc';
@@ -75,7 +75,6 @@ let lastCheckedHeight = 0;
 
 // PostgreSQL: prefer the published port of the forkex-db container (survives
 // container recreates), fall back to the live container IP.
-const RPC = rpcConfig();
 const DB_AUTH = dbConfig();
 let dbTarget = null;
 
@@ -146,35 +145,9 @@ const sleepMs = async () => {
 
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
+// Delegates to the shared lbtc-rpc client (cookie/env auth chain).
 function rpcCall(method, params = [], wallet) {
-    return new Promise((resolve, reject) => {
-        const body = JSON.stringify({ jsonrpc: '1.0', method, params, id: Date.now() });
-        const opts = {
-            hostname: RPC.host,
-            port: RPC.port,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + Buffer.from(`${RPC.user}:${RPC.password}`).toString('base64'),
-                'Content-Length': Buffer.byteLength(body),
-            },
-        };
-        if (wallet) opts.headers['X-LegacyCoin-Wallet'] = wallet;
-        const req = http.request(opts, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    if (json.error) reject(new Error(json.error.message));
-                    else resolve(json.result);
-                } catch (e) { reject(e); }
-            });
-        });
-        req.on('error', reject);
-        req.write(body);
-        req.end();
-    });
+    return rpc(method, params, wallet);
 }
 
 // rpcCallE retries politely on HTTP 429 (too many requests) so the monitor

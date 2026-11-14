@@ -1,6 +1,6 @@
 services:
   affiliation-service:
-    image: node:18-alpine
+    image: node:24-alpine
     container_name: forkex-affiliation
     working_dir: /app
     volumes:

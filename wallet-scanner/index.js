@@ -2,7 +2,6 @@
 
 const bitcoin = require('bitcoinjs-lib');
 const { Pool } = require('pg');
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +9,14 @@ const path = require('path');
 // wallet-scanner.service through /etc/lbtc-ops/wallet-scanner.env. They were
 // previously hardcoded here, and the RPC pair was additionally inlined into
 // the command line below, so the constants were dead code.
+//
+// RPC transport: the shared ../server/lib/lbtc-rpc.js client — legacycoreagent
+// (127.0.0.1:8444, X-Api-Key) first, direct node RPC (.cookie / env
+// credentials) as the transition-safe fallback. This replaced the
+// legacycoin-cli subprocess (execSync per call): no process fork per RPC, no
+// shell-quoting of arguments, and no node credentials in this env file at all.
+// Agent endpoints/key are loaded by the client from /etc/lbtc-ops/lbtc-ops.env;
+// values already set here (systemd) always win.
 function requireEnv(name) {
     const v = process.env[name];
     if (v === undefined || v === '') {
@@ -18,12 +25,7 @@ function requireEnv(name) {
     return v;
 }
 
-const RPC_PORT = Number(requireEnv('LBTC_RPC_PORT'));
-const RPC_HOST = requireEnv('LBTC_RPC_HOST');
-const CLI_PATH = process.env.LBTC_CLI_PATH || '/home/coin/go/bin/legacycoin-cli';
-
-const RPC_USER = requireEnv('LBTC_RPC_USER');
-const RPC_PASSWORD = requireEnv('LBTC_RPC_PASSWORD');
+const { rpc } = require('../server/lib/lbtc-rpc');
 
 const DB_CONFIG = {
     host: requireEnv('LBTC_DB_HOST'),
@@ -39,16 +41,10 @@ const STATE_FILE = path.join(__dirname, 'scanner-state.json');
 let knownAddresses = [];
 let lastScannedHeight = 0;
 
-function rpcCall(method) {
-    const args = [];
-    for (let i = 1; i < arguments.length; i++) {
-        args.push(typeof arguments[i] === 'string' ? `"${arguments[i]}"` : String(arguments[i]));
-    }
-    const cmd = `${CLI_PATH} -rpcport=${RPC_PORT} -rpcconnect=${RPC_HOST} -rpcuser=${RPC_USER} -rpcpassword=${RPC_PASSWORD} ${method} ${args.join(' ')} 2>&1`;
-    const out = execSync(cmd, { encoding: 'utf8', timeout: 30000 });
-    const parsed = JSON.parse(out);
-    if (parsed.error) throw new Error(`RPC ${method}: ${parsed.error.message}`);
-    return parsed.result;
+// Adapter over the shared client: legacy scripts called
+// rpcCall('method', arg1, arg2, ...) — variadic, no array.
+async function rpcCall(method) {
+    return rpc(method, Array.prototype.slice.call(arguments, 1));
 }
 
 function loadState() {
@@ -95,7 +91,7 @@ async function loadKnownAddresses(initial = false) {
         if (pubkeyHash === undefined) {
             pubkeyHash = null;
             try {
-                const info = rpcCall('validateaddress', row.address);
+                const info = await rpcCall('validateaddress', row.address);
                 if (info && info.isvalid && info.pubkey_hash_hex) pubkeyHash = info.pubkey_hash_hex;
             } catch (e) {
                 console.error(`[Scanner] Failed to validate ${row.address}: ${e.message}`);
@@ -212,8 +208,8 @@ async function recordPendingDeposit(userId, coinId, amount, txHash, address, vou
 }
 
 async function scanBlock(height) {
-    const hash = rpcCall('getblockhash', height);
-    const blockData = rpcCall('getblock', hash);
+    const hash = await rpcCall('getblockhash', height);
+    const blockData = await rpcCall('getblock', hash);
     const block = bitcoin.Block.fromHex(blockData.hex);
     let depositsFound = 0;
 
@@ -250,7 +246,7 @@ async function scanBlock(height) {
 
 async function scanLoop() {
     try {
-        const currentHeight = rpcCall('getblockcount');
+        const currentHeight = await rpcCall('getblockcount');
         await loadKnownAddresses();
         if (lastScannedHeight <= 0) {
             lastScannedHeight = currentHeight;

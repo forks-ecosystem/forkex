@@ -1,8 +1,8 @@
 # В файле /opt/hollaex-kit/server/tools/Dockerfile
-FROM node:20.18.1-bullseye-slim
+FROM node:24-bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y curl openssl ca-certificates git python build-essential && \
+    apt-get install -y curl openssl ca-certificates git python3 build-essential && \
     rm -rf /var/lib/apt/lists/* && \
     npm install --unsafe-perm=true pm2@5.2.0 sequelize-cli@6.5.1 mocha -g --loglevel=error
 

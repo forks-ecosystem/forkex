@@ -14,24 +14,13 @@
 'use strict';
 
 const { Client } = require('pg');
-const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
+const { dbConfig } = require('./lbtc-ops-env');
+const { rpc } = require('./lbtc-rpc');
 
 const CURRENCY = 'lbtc';
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 
-async function rpc(method, params) {
-  const res = await fetch(`http://${RPC.host}:${RPC.port}/`, {
-    method: 'POST',
-    headers: { 'content-type': 'text/plain', authorization: 'Basic ' + Buffer.from(`${RPC.user}:${RPC.password}`).toString('base64') },
-    body: JSON.stringify({ jsonrpc: '1.0', id: 'r', method, params })
-  });
-  const j = await res.json();
-  if (j.error) throw new Error(`${method}: ${j.error.message || JSON.stringify(j.error)}`);
-  return j.result;
-}
-
-const RPC = rpcConfig();
 const DB_AUTH = dbConfig();
 // Same resolution order as check-lbtc-deposits.js: the published port first,
 // then the live container IP, since the container is recreated on redeploy and

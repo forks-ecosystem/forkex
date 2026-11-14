@@ -1,393 +1,105 @@
 'use strict';
 
+// LBTC WITHDRAWAL — вывод с биржи через legacycoreagent.
+//
+// Раньше этот скрипт сам ходил в JSON-RPC ноды, восстанавливал приватный ключ
+// из мнемоники /app/forkex/wallets/lbtc-hot-wallet.json и подписывал
+// транзакции локально (bitcoinjs-lib + ручная DER/сигхаш арифметика). Теперь
+// ключи и подпись принадлежат агенту: /app/legacycoreagent (systemd
+// legacycoreagent.service) держит нодовый hot-кошелёк и подписывает send на
+// стороне ноды. Биржевой скрипт мнемоники больше не касается и имеет только
+// HTTP-доступ к агенту — скомпрометированный API-контейнер не получает ключ.
+//
+//Агент подписывает, только если `from` принадлежит нодовому кошельку
+// (LEGACYCOIN_HOT_WALLET, по умолчанию `withdrawal`), так что вывод всегда
+// идёт с operational-флота; `to` — внешний адрес получателя.
+//
+// Суммы по HTTP передаются в базовых единицах (1 LBTC = 1e8), в CLI и DB —
+// в LBTC, как и раньше.
+//
+// Запуск:
+//   node scripts/lbtc-withdraw.js balance                        - баланс hot-кошелька
+//   node scripts/lbtc-withdraw.js utxos [address]                - UTXO адреса
+//   node scripts/lbtc-withdraw.js send <address> <amount> [fee]  - вывод LBTC
+//   node scripts/lbtc-withdraw.js validate <address>             - проверка адреса
+//
+// Конфиг: LBTC_AGENT_HOST/PORT/API_KEY и LBTC_HOT_ADDRESS берутся из окружения
+// (загружается через ./lbtc-ops-env.js: /etc/lbtc-ops/lbtc-ops.env, /app/forkex/.env).
+
 const http = require('http');
-const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
-const crypto = require('crypto');
-const bitcoin = require('bitcoinjs-lib');
-const ecc = require('tiny-secp256k1');
-const { ECPairFactory } = require('ecpair');
-const bip32 = require('bip32');
-const bip39 = require('bip39');
+const { dbConfig } = require('./lbtc-ops-env');
 const { Client } = require('pg');
 
-bitcoin.initEccLib(ecc);
-const ECPair = ECPairFactory(ecc);
-
-const LBTC_NETWORK = {
-    messagePrefix: '\x1cLigercoin Signed Message:\n',
-    bip32: { public: 0x0488B21E, private: 0x0488ADE4 },
-    pubKeyHash: 0x30,
-    scriptHash: 0x32,
-    wif: 0xB0,
-};
-
 const CURRENCY = 'lbtc';
-const HOT_WALLET_PATH = 'm/44\'/177\'/0\'/0/0';
+// Hot-адрес operational-флота узла (тот же, что и в fee-sweep.js).
+const HOT_ADDRESS = process.env.LBTC_HOT_ADDRESS || 'LQehzjT3YXhTiQD8bVzM1suVSL2Ty3JZYB';
+const AGENT_HOST = process.env.LBTC_AGENT_HOST || '127.0.0.1';
+const AGENT_PORT = parseInt(process.env.LBTC_AGENT_PORT) || 8444;
+// Ключ выдаётся агенту только для send; без него агент отвечает 401.
+const AGENT_KEY = process.env.LBTC_AGENT_API_KEY || '';
 
-function rpcCall(method, params = []) {
+const BASE = 1e8; // 1 LBTC
+function lbtcToBase(lbtc) { return Math.round(Number(lbtc) * BASE); }
+function fmt(lbtc) { return Number(lbtc).toFixed(8); }
+
+// --- AGENT HTTP ---
+
+function agentCall(method, path, body) {
     return new Promise((resolve, reject) => {
-        const body = JSON.stringify({ jsonrpc: '1.0', method, params, id: Date.now() });
-        const opts = {
-            hostname: RPC.host,
-            port: RPC.port,
-            method: 'POST',
+        const payload = body ? JSON.stringify(body) : '';
+        const req = http.request({
+            hostname: AGENT_HOST,
+            port: AGENT_PORT,
+            path,
+            method,
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + Buffer.from(`${RPC.user}:${RPC.password}`).toString('base64'),
-                'Content-Length': Buffer.byteLength(body),
+                'X-Api-Key': AGENT_KEY,
+                'Content-Length': Buffer.byteLength(payload),
             },
-        };
-        const req = http.request(opts, (res) => {
+        }, (res) => {
             let data = '';
-            res.on('data', (chunk) => data += chunk);
+            res.on('data', (c) => data += c);
             res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    if (json.error) reject(new Error(json.error.message));
-                    else resolve(json.result);
-                } catch (e) { reject(e); }
+                let json;
+                try { json = JSON.parse(data); } catch (e) {
+                    return reject(new Error(`agent: unparsable reply (HTTP ${res.statusCode}): ${data.slice(0, 200)}`));
+                }
+                if (json.error) return reject(new Error(`agent: ${json.error}`));
+                resolve(json.result !== undefined ? json.result : json);
             });
         });
-        req.on('error', reject);
-        req.write(body);
+        req.on('error', (e) => reject(new Error(`agent unreachable at ${AGENT_HOST}:${AGENT_PORT}: ${e.message}`)));
+        if (payload) req.write(payload);
         req.end();
     });
 }
 
-async function getBlock(height) {
-    const hash = await rpcCall('getblockhash', [height]);
-    return rpcCall('getblock', [hash]);
+async function validateAddress(address) {
+    return agentCall('GET', `/api/chain/lbtc/validate/${encodeURIComponent(address)}`);
 }
 
-function loadHotWallet() {
-    const fs = require('fs');
-    const walletPath = '/app/forkex/wallets/lbtc-hot-wallet.json';
-    if (!fs.existsSync(walletPath)) throw new Error('Hot wallet file not found: ' + walletPath);
-    const wallet = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
-    const seed = bip39.mnemonicToSeedSync(wallet.mnemonic);
-    const root = bip32.default(ecc).fromSeed(seed);
-    const child = root.derivePath(wallet.path);
-    const keyPair = ECPair.fromPrivateKey(child.privateKey);
-    const { address } = bitcoin.payments.p2pkh({ pubkey: keyPair.publicKey, network: LBTC_NETWORK });
-    return { keyPair, address, privateKey: child.privateKey, publicKey: keyPair.publicKey };
+async function getAddressBalance(address) {
+    return agentCall('GET', `/api/chain/lbtc/balance/${encodeURIComponent(address)}`);
 }
 
-function loadKeyPairFromMnemonic(mnemonic, path) {
-    const seed = bip39.mnemonicToSeedSync(mnemonic);
-    const root = bip32.default(ecc).fromSeed(seed);
-    const child = root.derivePath(path || HOT_WALLET_PATH);
-    const keyPair = ECPair.fromPrivateKey(child.privateKey);
-    const { address } = bitcoin.payments.p2pkh({ pubkey: keyPair.publicKey, network: LBTC_NETWORK });
-    return { keyPair, address, privateKey: child.privateKey, publicKey: keyPair.publicKey };
+async function listUtxos(address, minconf = 1) {
+    const res = await agentCall('GET', `/api/chain/lbtc/utxos/${encodeURIComponent(address)}?minconf=${minconf}`);
+    return (res && res.utxos) || [];
 }
 
-function hash160(buffer) {
-    const sha = crypto.createHash('sha256').update(buffer).digest();
-    return crypto.createHash('ripemd160').update(sha).digest();
-}
-
-function addressToScriptPubKey(address) {
-    const decoded = bs58decode(address);
-    if (decoded.length !== 25) throw new Error('Invalid address length');
-    const version = decoded[0];
-    const hash = decoded.slice(1, 21);
-    const checksum = decoded.slice(21);
-    const expectedChecksum = bs58check(Buffer.concat([Buffer.from([version]), hash]));
-    if (!checksum.equals(expectedChecksum)) throw new Error('Invalid address checksum');
-    if (version !== LBTC_NETWORK.pubKeyHash) throw new Error('Invalid address version');
-    return Buffer.concat([Buffer.from([0x76, 0xa9, 0x14]), hash, Buffer.from([0x88, 0xac])]);
-}
-
-function bs58decode(str) {
-    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-    let result = BigInt(0);
-    for (const c of str) {
-        const idx = alphabet.indexOf(c);
-        if (idx < 0) throw new Error('Invalid base58 character: ' + c);
-        result = result * BigInt(58) + BigInt(idx);
-    }
-    const hex = result.toString(16).padStart(2, '0');
-    const bytes = Buffer.from(hex.length % 2 ? '0' + hex : hex, 'hex');
-    const leadingOnes = str.split('').filter(c => c === '1').length;
-    return Buffer.concat([Buffer.alloc(leadingOnes), bytes]);
-}
-
-function bs58check(buffer) {
-    const sha1 = crypto.createHash('sha256').update(buffer).digest();
-    const sha2 = crypto.createHash('sha256').update(sha1).digest();
-    return sha2.slice(0, 4);
-}
-
-function parseBlockTxids(hexStr) {
-    const data = Buffer.from(hexStr, 'hex');
-    if (data.length < 80) return [];
-    const body = data.subarray(80);
-    let offset = 0;
-    const { value: count, bytesRead: countLen } = readVarInt(body, offset);
-    offset += countLen;
-    const txids = [];
-    for (let i = 0; i < count; i++) {
-        const txStart = offset;
-        offset = skipTx(body, offset);
-        const txBytes = body.subarray(txStart, offset);
-        const h1 = crypto.createHash('sha256').update(txBytes).digest();
-        const h2 = crypto.createHash('sha256').update(h1).digest();
-        h2.reverse();
-        txids.push(h2.toString('hex'));
-    }
-    return txids;
-}
-
-function readVarInt(buf, offset) {
-    const b = buf[offset];
-    if (b < 0xfd) return { value: b, bytesRead: 1 };
-    if (b === 0xfd) return { value: buf.readUInt16LE(offset + 1), bytesRead: 3 };
-    if (b === 0xfe) return { value: buf.readUInt32LE(offset + 1), bytesRead: 5 };
-    return { value: Number(buf.readBigUInt64LE(offset + 1)), bytesRead: 9 };
-}
-
-function skipTx(buf, offset) {
-    offset += 4;
-    let segwit = false;
-    if (buf[offset] === 0x00) { segwit = true; offset += 2; }
-    let { value: inCount, bytesRead } = readVarInt(buf, offset); offset += bytesRead;
-    for (let i = 0; i < inCount; i++) {
-        offset += 36;
-        const { value: sl, bytesRead: slb } = readVarInt(buf, offset); offset += slb + sl; offset += 4;
-    }
-    let { value: outCount, bytesRead: ol } = readVarInt(buf, offset); offset += ol;
-    for (let i = 0; i < outCount; i++) {
-        offset += 8;
-        const { value: sl, bytesRead: slb } = readVarInt(buf, offset); offset += slb + sl;
-    }
-    if (segwit) {
-        for (let i = 0; i < inCount; i++) {
-            let { value: stackCount, bytesRead: scl } = readVarInt(buf, offset); offset += scl;
-            for (let j = 0; j < stackCount; j++) {
-                const { value: il, bytesRead: ilb } = readVarInt(buf, offset); offset += ilb + il;
-            }
-        }
-    }
-    offset += 4;
-    return offset;
-}
-
-// --- UTXO SCANNER ---
-// Scans all blocks to find UTXOs for a given address
-// Returns array of { txid, vout, value, scriptPubKey, confirmations }
-
-async function scanForUTXOs(address, fromHeight = 0, toHeight = null) {
-    const tip = toHeight || await rpcCall('getblockcount');
-    if (fromHeight === 0) fromHeight = Math.max(0, tip - 1000);
-    const scriptPubKey = addressToScriptPubKey(address);
-    const utxos = [];
-    const spentOutpoints = new Set();
-
-    console.log(`[UTXO] Scanning blocks ${fromHeight}-${tip} for ${address}`);
-
-    for (let h = fromHeight; h <= tip; h++) {
-        const hash = await rpcCall('getblockhash', [h]);
-        const block = await getBlock(h);
-        const txids = Array.isArray(block.tx) ? block.tx : [];
-        if (txids.length === 0 && block.hex) {
-            try { txids.push(...parseBlockTxids(block.hex)); } catch (e) {}
-        }
-
-        for (const txid of txids) {
-            try {
-                const tx = await rpcCall('getrawtransaction', [txid, true]);
-                // Mark spent outpoints
-                for (const vin of (tx.vin || [])) {
-                    if (vin.txid) {
-                        spentOutpoints.add(`${vin.txid}:${vin.vout}`);
-                    }
-                }
-                // Find outputs to our address
-                for (let n = 0; n < (tx.vout || []).length; n++) {
-                    const vout = tx.vout[n];
-                    const addrs = vout.scriptPubKey?.addresses || [];
-                    if (addrs.includes(address)) {
-                        const outpoint = `${txid}:${n}`;
-                        if (!spentOutpoints.has(outpoint)) {
-                            utxos.push({
-                                txid,
-                                vout: n,
-                                value: vout.value,
-                                scriptPubKey: vout.scriptPubKey.hex,
-                                confirmations: (tx.confirmations || 0),
-                                height: h,
-                            });
-                        }
-                    }
-                }
-            } catch (e) {}
-        }
-        if (h % 100 === 0) console.log(`[UTXO] Scanned block ${h}/${tip}`);
-    }
-
-    // Remove UTXOs that were already spent by later txs in the same scan range
-    const unspentUtxos = utxos.filter(u => !spentOutpoints.has(`${u.txid}:${u.vout}`));
-
-    console.log(`[UTXO] Found ${unspentUtxos.length} unspent UTXOs totaling ${unspentUtxos.reduce((s, u) => s + u.value, 0)} LBTC`);
-    return unspentUtxos;
-}
-
-// --- FAST UTXO SCANNER ---
-// Uses a lighter approach: scan from a known block range, track only our address
-
-async function fastScanUTXOs(address, fromHeight = null) {
-    const tip = await rpcCall('getblockcount');
-    if (fromHeight === null) fromHeight = Math.max(0, tip - 500);
-    const scriptPubKeyHex = addressToScriptPubKey(address).toString('hex');
-    const utxos = [];
-    const spentOutpoints = new Set();
-
-    console.log(`[FastUTXO] Scanning blocks ${fromHeight}-${tip} for ${address}`);
-
-    for (let h = fromHeight; h <= tip; h++) {
-        const block = await getBlock(h);
-        const txids = Array.isArray(block.tx) ? block.tx : [];
-        if (txids.length === 0 && block.hex) {
-            try { txids.push(...parseBlockTxids(block.hex)); } catch (e) {}
-        }
-
-        for (const txid of txids) {
-            try {
-                const tx = await rpcCall('getrawtransaction', [txid, true]);
-                for (const vin of (tx.vin || [])) {
-                    if (vin.txid) spentOutpoints.add(`${vin.txid}:${vin.vout}`);
-                }
-                for (let n = 0; n < (tx.vout || []).length; n++) {
-                    const vout = tx.vout[n];
-                    if (vout.scriptPubKey?.hex === scriptPubKeyHex) {
-                        const outpoint = `${txid}:${n}`;
-                        if (!spentOutpoints.has(outpoint)) {
-                            utxos.push({
-                                txid,
-                                vout: n,
-                                value: vout.value,
-                                scriptPubKey: vout.scriptPubKey.hex,
-                                confirmations: tip - h + 1,
-                                height: h,
-                            });
-                        }
-                    }
-                }
-            } catch (e) {}
-        }
-    }
-
-    // Remove UTXOs that were already spent by later txs in the same scan range
-    const unspentUtxos = utxos.filter(u => !spentOutpoints.has(`${u.txid}:${u.vout}`));
-
-    console.log(`[FastUTXO] Found ${unspentUtxos.length} unspent UTXOs totaling ${unspentUtxos.reduce((s, u) => s + u.value, 0)} LBTC`);
-    return unspentUtxos;
-}
-
-// --- BUILD RAW TRANSACTION (bitcoinjs-lib v6 / manual signing) ---
-
-function addressToOutputScript(address) {
-    const decoded = bs58decode(address);
-    if (decoded.length !== 25) throw new Error('Invalid address length');
-    const version = decoded[0];
-    const hash = decoded.slice(1, 21);
-    if (version !== LBTC_NETWORK.pubKeyHash) throw new Error('Invalid address version');
-    return Buffer.concat([Buffer.from([0x76, 0xa9, 0x14]), Buffer.from(hash), Buffer.from([0x88, 0xac])]);
-}
-
-function buildAndSignTransaction(utxos, recipientAddress, amount, changeAddress, fee, keyPair) {
-    const totalInput = utxos.reduce((s, u) => s + u.value, 0);
-    const changeRaw = totalInput - amount - fee;
-
-    if (changeRaw < 0) throw new Error(`Insufficient funds: have ${totalInput}, need ${amount + fee}`);
-
-    const tx = new bitcoin.Transaction();
-    tx.version = 2;
-
-    // Add inputs
-    const inputScripts = [];
-    for (const utxo of utxos) {
-        const prevTxHash = Buffer.from(utxo.txid, 'hex').reverse();
-        tx.addInput(prevTxHash, utxo.vout);
-        inputScripts.push(Buffer.from(utxo.scriptPubKey, 'hex'));
-    }
-
-    // Add recipient output
-    const amountSat = Math.round(amount * 1e8);
-    const recipientScript = addressToOutputScript(recipientAddress);
-    tx.addOutput(recipientScript, BigInt(amountSat));
-
-    // Add change output if significant
-    if (changeAddress && changeRaw > 0.000005) {
-        const changeSat = Math.round(changeRaw * 1e8);
-        const changeScript = addressToOutputScript(changeAddress);
-        tx.addOutput(changeScript, BigInt(changeSat));
-    }
-
-    // Sign each input
-    for (let i = 0; i < utxos.length; i++) {
-        const utxo = utxos[i];
-        const valueSat = BigInt(Math.round(utxo.value * 1e8));
-        const signatureHash = tx.hashForSignature(i, inputScripts[i], bitcoin.Transaction.SIGHASH_ALL);
-        const hashBuf = Buffer.from(signatureHash);
-        const sig = keyPair.sign(hashBuf);
-        const derSig = encodeDER(sig);
-        // Build scriptSig: push <DER sig + sighash byte> then push <pubkey>
-        const sighashByte = Buffer.from([bitcoin.Transaction.SIGHASH_ALL]);
-        const combined = Buffer.concat([derSig, sighashByte]);
-        const pubkey = Buffer.from(keyPair.publicKey);
-        const inputScript = Buffer.concat([
-            pushData(combined),
-            combined,
-            pushData(pubkey),
-            pubkey,
-        ]);
-        tx.setInputScript(i, inputScript);
-    }
-
-    return tx;
-}
-
-function pushData(data) {
-    const len = data.length;
-    if (len < 0x4c) return Buffer.from([len]);
-    if (len < 0x100) return Buffer.from([0x4c, len]);
-    if (len < 0x10000) return Buffer.from([0x4d, len & 0xff, (len >> 8) & 0xff]);
-    return Buffer.from([0x4e, len & 0xff, (len >> 8) & 0xff, (len >> 16) & 0xff, (len >> 24) & 0xff]);
-}
-
-function encodeDER(signature) {
-    const r = signature.subarray(0, 32);
-    const s = signature.subarray(32, 64);
-    // Remove leading zeros from r and s
-    let rStart = 0;
-    while (rStart < r.length - 1 && r[rStart] === 0) rStart++;
-    let sStart = 0;
-    while (sStart < s.length - 1 && s[sStart] === 0) sStart++;
-    const rBytes = r.subarray(rStart);
-    const sBytes = s.subarray(sStart);
-    // Add leading 0x00 if high bit set
-    const rBuf = (rBytes[0] & 0x80) ? Buffer.concat([Buffer.from([0x00]), rBytes]) : rBytes;
-    const sBuf = (sBytes[0] & 0x80) ? Buffer.concat([Buffer.from([0x00]), sBytes]) : sBytes;
-    const totalLen = 2 + rBuf.length + 2 + sBuf.length;
-    return Buffer.concat([
-        Buffer.from([0x30, totalLen]),
-        Buffer.from([0x02, rBuf.length]), rBuf,
-        Buffer.from([0x02, sBuf.length]), sBuf,
-    ]);
-}
-
-async function broadcastTransaction(tx) {
-    const hex = tx.toHex();
-    console.log(`[Broadcast] TX hex (${hex.length} chars): ${hex.substring(0, 80)}...`);
-    try {
-        const result = await rpcCall('sendrawtransaction', [hex]);
-        console.log(`[Broadcast] Success! TXID: ${result}`);
-        return result;
-    } catch (err) {
-        console.error(`[Broadcast] Failed: ${err.message}`);
-        throw err;
-    }
+// Подпись выполняет нода: send требует X-Api-Key и отправляет только с
+// контролируемого агентом hot-кошелька. Суммы — в базовых единицах.
+async function sendThroughAgent(toAddress, amountBase, feeBase) {
+    const res = await agentCall('POST', '/api/chain/lbtc/send', {
+        from: HOT_ADDRESS,
+        to: toAddress,
+        amount: amountBase,
+        fee: feeBase,
+    });
+    const txid = res && (res.txid || res.tx_id);
+    if (!txid) throw new Error(`agent send returned no txid: ${JSON.stringify(res).slice(0, 200)}`);
+    return txid;
 }
 
 // --- DB HELPERS ---
@@ -398,76 +110,64 @@ async function getDbClient() {
     return client;
 }
 
-  async function recordWithdrawal(db, userId, amount, txHash, address, fee = 0) {
-      const total = Number(amount) + Number(fee);
-      // Check rowCount: the old form fired the UPDATE and ignored the result, so a
-      // user without funds still got a recorded, broadcast withdrawal with nothing
-      // debited. One row for one user+currency, so anything else means the write
-      // did not land and must not be papered over with a transaction row.
-      const upd = await db.query(
-          `UPDATE balances SET balance = balance - $1::numeric - $3::numeric, available = available - $1::numeric - $3::numeric, updated_at = NOW()
-           WHERE user_id = $2::int AND currency = $4 AND (balance - $1::numeric - $3::numeric) >= 0`,
-          [amount, userId, fee, CURRENCY]
-      );
-      if (upd.rowCount !== 1) {
-          throw new Error(`balance debit for user ${userId} touched ${upd.rowCount} rows, expected 1 (need ${total} LBTC)`);
-      }
-      await db.query(
-          `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
-           VALUES ($1::int, 'withdrawal', $2::numeric, $4, 'completed', $3::numeric, $4, 'On-chain LBTC withdrawal', NULL, $5, $6, 'lbtc', '{}', NOW(), NOW())`,
-          [userId, amount, fee, CURRENCY, txHash, address]
-      );
-      // No user_wallets sync here on purpose. Writing b.balance into every wallet
-      // of the user stamped all 13 of user 1's addresses with 7499.99 on
-      // 2026-09-27, a value no single address held. user_wallets.balance is one
-      // address's on-chain balance and is written from chain data by
-      // check-lbtc-deposits.js, matched by address.
-      console.log(`[DB] Recorded withdrawal: ${amount} LBTC to ${address}, tx: ${txHash}`);
-  }
+async function recordWithdrawal(db, userId, amount, txHash, address, fee = 0) {
+    const total = Number(amount) + Number(fee);
+    // Check rowCount: the old form fired the UPDATE and ignored the result, so a
+    // user without funds still got a recorded, broadcast withdrawal with nothing
+    // debited. One row for one user+currency, so anything else means the write
+    // did not land and must not be papered over with a transaction row.
+    const upd = await db.query(
+        `UPDATE balances SET balance = balance - $1::numeric - $3::numeric, available = available - $1::numeric - $3::numeric, updated_at = NOW()
+         WHERE user_id = $2::int AND currency = $4 AND (balance - $1::numeric - $3::numeric) >= 0`,
+        [amount, userId, fee, CURRENCY]
+    );
+    if (upd.rowCount !== 1) {
+        throw new Error(`balance debit for user ${userId} touched ${upd.rowCount} rows, expected 1 (need ${total} LBTC)`);
+    }
+    await db.query(
+        `INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
+         VALUES ($1::int, 'withdrawal', $2::numeric, $4, 'completed', $3::numeric, $4, 'On-chain LBTC withdrawal', NULL, $5, $6, 'lbtc', '{}', NOW(), NOW())`,
+        [userId, amount, fee, CURRENCY, txHash, address]
+    );
+    // No user_wallets sync here on purpose. Writing b.balance into every wallet
+    // of the user stamped all 13 of user 1's addresses with 7499.99 on
+    // 2026-09-27, a value no single address held. user_wallets.balance is one
+    // address's on-chain balance and is written from chain data by
+    // check-lbtc-deposits.js, matched by address.
+    console.log(`[DB] Recorded withdrawal: ${fmt(amount)} LBTC to ${address}, tx: ${txHash}`);
+}
 
 // --- MAIN WITHDRAWAL FUNCTION ---
 
 async function processWithdrawal(recipientAddress, amount, fee = 0.0001) {
     console.log(`\n=== LBTC WITHDRAWAL ===`);
     console.log(`To: ${recipientAddress}`);
-    console.log(`Amount: ${amount} LBTC`);
-    console.log(`Fee: ${fee} LBTC`);
+    console.log(`Amount: ${fmt(amount)} LBTC`);
+    console.log(`Fee: ${fmt(fee)} LBTC`);
 
-    // Load hot wallet
-    const wallet = loadHotWallet();
-    console.log(`Hot wallet: ${wallet.address}`);
-
-    // Scan UTXOs
-    const utxos = await fastScanUTXOs(wallet.address);
-    if (utxos.length === 0) throw new Error('No UTXOs found for hot wallet');
-
-    const totalAvailable = utxos.reduce((s, u) => s + u.value, 0);
-    console.log(`Available: ${totalAvailable} LBTC in ${utxos.length} UTXOs`);
-
-    if (totalAvailable < amount + fee) {
-        throw new Error(`Insufficient funds: have ${totalAvailable}, need ${amount + fee}`);
+    // Ранний отказ на невалидном адресе — дешевле, чем отклонённая нодой транзакция.
+    const vinfo = await validateAddress(recipientAddress);
+    if (!vinfo || vinfo.isvalid !== true) {
+        throw new Error(`invalid recipient address: ${recipientAddress}`);
     }
 
-    // Sort UTXOs by value (largest first for efficiency)
-    utxos.sort((a, b) => b.value - a.value);
+    // Проверка перед отправкой — только информативная: sendtoaddress на ноде
+    // выбирает UTXO со всего кошелька, а не с одного адреса, поэтому
+    // заниженный адресный баланс не повод фейлить вывод. Финальную проверку
+    // баланса выполняет агент.
+    const bal = await getAddressBalance(HOT_ADDRESS);
+    const availableBase = Number(bal ? (bal.balance_base_units !== undefined ? bal.balance_base_units : bal.balance) : 0);
+    console.log(`Hot wallet: ${HOT_ADDRESS} (agent-pinned)`);
+    console.log(`Hot wallet address balance: ${fmt(availableBase / BASE)} LBTC`);
 
-    // Select UTXOs (use smallest number of inputs)
-    let selectedUtxos = [];
-    let selectedTotal = 0;
-    for (const utxo of utxos) {
-        selectedUtxos.push(utxo);
-        selectedTotal += utxo.value;
-        if (selectedTotal >= amount + fee) break;
+    const needBase = lbtcToBase(amount) + lbtcToBase(fee);
+    if (availableBase < needBase) {
+        console.log(`[WARN] address balance ${fmt(availableBase / BASE)} LBTC < всего к отправке ${fmt(amount + fee)} LBTC — попытка через агента всё равно выполняется.`);
     }
 
-    console.log(`Selected ${selectedUtxos.length} UTXOs totaling ${selectedTotal} LBTC`);
-
-    // Build and sign
-    const tx = buildAndSignTransaction(selectedUtxos, recipientAddress, amount, wallet.address, fee, wallet.keyPair);
-    console.log(`Raw TX: ${tx.toHex().substring(0, 100)}...`);
-
-    // Broadcast
-    const txid = await broadcastTransaction(tx);
+    // Отправка через агент: нода выбирает UTXO, подписывает и бродкастит.
+    const txid = await sendThroughAgent(recipientAddress, lbtcToBase(amount), lbtcToBase(fee));
+    console.log(`[Agent] Broadcast via agent, TXID: ${txid}`);
 
     // Record in DB (deduct from hot wallet user_id=1)
     const db = await getDbClient();
@@ -479,12 +179,23 @@ async function processWithdrawal(recipientAddress, amount, fee = 0.0001) {
 
     console.log(`\n=== WITHDRAWAL COMPLETE ===`);
     console.log(`TXID: ${txid}`);
-    console.log(`Amount: ${amount} LBTC`);
+    console.log(`Amount: ${fmt(amount)} LBTC`);
     console.log(`To: ${recipientAddress}`);
-    console.log(`Fee: ${fee} LBTC`);
+    console.log(`Fee: ${fmt(fee)} LBTC`);
     console.log(`Explorer: http://127.0.0.1:8083/tx/${txid}`);
 
     return { txid, amount, fee, address: recipientAddress };
+}
+
+// --- Logging helper for UTXO lists ---
+
+function printUtxos(utxos) {
+    let total = 0;
+    for (const u of utxos) {
+        total += Number(u.value);
+        console.log(`  ${fmt(u.value / BASE)} LBTC | tx:${u.txid}:${u.vout} | height:${u.height}`);
+    }
+    console.log(`Total: ${fmt(total / BASE)} LBTC in ${utxos.length} UTXOs`);
 }
 
 // --- CLI ---
@@ -493,12 +204,21 @@ async function main() {
     const args = process.argv.slice(2);
 
     if (args[0] === 'utxos') {
-        const addr = args[1] || loadHotWallet().address;
-        const from = parseInt(args[2]) || 0;
-        const utxos = await fastScanUTXOs(addr, from);
-        for (const u of utxos) {
-            console.log(`  ${u.value} LBTC | tx:${u.txid}:${u.vout} | confs:${u.confirmations}`);
-        }
+        const addr = args[1] || HOT_ADDRESS;
+        const utxos = await listUtxos(addr);
+        console.log(`UTXOs for ${addr}:`);
+        printUtxos(utxos);
+        return;
+    }
+
+    if (args[0] === 'balance') {
+        console.log(`Hot wallet address: ${HOT_ADDRESS} (agent-pinned, node wallet signs)`);
+        const bal = await getAddressBalance(HOT_ADDRESS);
+        const base = Number(bal ? (bal.balance_base_units !== undefined ? bal.balance_base_units : bal.balance) : 0);
+        console.log(`Confirmed balance: ${fmt(base / BASE)} LBTC`);
+        const utxos = await listUtxos(HOT_ADDRESS);
+        console.log(`UTXOs: ${utxos.length}`);
+        printUtxos(utxos);
         return;
     }
 
@@ -510,30 +230,25 @@ async function main() {
         const address = args[1];
         const amount = parseFloat(args[2]);
         const fee = parseFloat(args[3]) || 0.0001;
+        if (!(amount > 0)) throw new Error(`bad amount: ${args[2]}`);
         await processWithdrawal(address, amount, fee);
         return;
     }
 
-    if (args[0] === 'balance') {
-        const wallet = loadHotWallet();
-        console.log(`Hot wallet address: ${wallet.address}`);
-        const utxos = await fastScanUTXOs(wallet.address);
-        const total = utxos.reduce((s, u) => s + u.value, 0);
-        console.log(`Confirmed balance: ${total} LBTC`);
-        console.log(`UTXOs: ${utxos.length}`);
-        for (const u of utxos) {
-            console.log(`  ${u.value} LBTC | tx:${u.txid}:${u.vout} | confs:${u.confirmations}`);
-        }
+    if (args[0] === 'validate') {
+        const info = await validateAddress(args[1] || '');
+        console.log(JSON.stringify(info, null, 2));
         return;
     }
 
-    console.log('LBTC Withdrawal Tool');
+    console.log('LBTC Withdrawal Tool (via legacycoreagent)');
     console.log('Usage:');
-    console.log('  node lbtc-withdraw.js balance                           - Show hot wallet balance');
-    console.log('  node lbtc-withdraw.js utxos [address] [fromHeight]      - List UTXOs');
-    console.log('  node lbtc-withdraw.js send <address> <amount> [fee]     - Send LBTC');
+    console.log('  node lbtc-withdraw.js balance                     - Show hot wallet balance');
+    console.log('  node lbtc-withdraw.js utxos [address]             - List UTXOs');
+    console.log('  node lbtc-withdraw.js send <address> <amount> [fee] - Send LBTC');
+    console.log('  node lbtc-withdraw.js validate <address>          - Validate address');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
 
-module.exports = { processWithdrawal, loadHotWallet, fastScanUTXOs, buildAndSignTransaction, broadcastTransaction };
+module.exports = { processWithdrawal };

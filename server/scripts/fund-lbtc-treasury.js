@@ -21,8 +21,8 @@
 //   node fund-lbtc-treasury.js --destination <ADDR>     # план для конкретного адреса
 //   node fund-lbtc-treasury.js --destination <ADDR> --execute
 
-const http = require('http');
-const { rpcConfig, dbConfig } = require('./lbtc-ops-env');
+const { dbConfig } = require('./lbtc-ops-env');
+const { rpc } = require('./lbtc-rpc');
 const fs = require('fs');
 
 const CURRENCY = 'lbtc';
@@ -44,28 +44,9 @@ const DESTINATION = val('--destination');
 const AMOUNT_OVERRIDE = val('--amount');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const rpcCall = (method, params = []) => new Promise((resolve, reject) => {
-    const body = JSON.stringify({ jsonrpc: '1.0', id: 'f', method, params });
-    const req = http.request({
-        host: RPC.host, port: RPC.port, method: 'POST',
-        auth: `${RPC.user}:${RPC.password}`,
-        headers: { 'content-type': 'text/plain', 'content-length': Buffer.byteLength(body) },
-        timeout: 60000,
-    }, (res) => {
-        let raw = '';
-        res.on('data', c => raw += c);
-        res.on('end', () => {
-            let d; try { d = JSON.parse(raw); } catch (e) { return reject(new Error('bad JSON: ' + raw.slice(0, 200))); }
-            if (d.error) return reject(new Error(`${method}: ${d.error.message || JSON.stringify(d.error)}`));
-            resolve(d.result);
-        });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error(`${method}: timeout`)); });
-    req.end(body);
-});
-
-const RPC = rpcConfig();
+// Крупные транзакции (сборка из сотен UTXO) могут собираться дольше дефолтных
+// 20 секунд — даём 60.
+const rpcCall = (method, params = []) => rpc(method, params, '', { timeout: 60000 });
 const DB_AUTH = dbConfig();
 async function connectDb() {
     const { Client } = require('pg');
