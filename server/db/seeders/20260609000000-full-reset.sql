@@ -82,6 +82,14 @@ INSERT INTO coins (name, symbol, fullname, display_name, icon_id, status, active
 INSERT INTO pairs (base_coin_id, quote_coin_id, pair_base, pair_2, symbol, name, active, status, taker_fees, maker_fees, min_size, max_size, increment_size, increment_price, is_public, circuit_breaker, created_at, updated_at) VALUES
 ((SELECT id FROM coins WHERE symbol='lbtc'), (SELECT id FROM coins WHERE symbol='usdt'), 'lbtc', 'usdt', 'lbtc-usdt', 'LBTC/USDT', true, 'active', 0.001, 0.0005, 0.1, 1000, 0.1, 0.01, true, true, NOW(), NOW());
 
+-- 9. ДОБАВЛЯЕМ RVN (Ravencoin)
+INSERT INTO coins (name, symbol, fullname, display_name, icon_id, status, active, verified, allow_deposit, allow_withdrawal, withdrawal_fee, min, max, increment, increment_unit, code, type, network, standard, issuer, is_risky, is_public, created_at, updated_at) VALUES
+('Ravencoin',    'rvn',  'Ravencoin',      'Ravencoin',      'RVN_ICON',  true, true, true, true, true, 0.1,       0.5,       100000,     0.00000001, 0.00000001, 'RVN',  'blockchain', 'rvn',  NULL,       'RavenProject', false, true, NOW(), NOW());
+
+-- 10. ДОБАВЛЯЕМ ПАРУ LBTC/RVN
+INSERT INTO pairs (base_coin_id, quote_coin_id, pair_base, pair_2, symbol, name, active, status, taker_fees, maker_fees, min_size, max_size, increment_size, increment_price, is_public, circuit_breaker, created_at, updated_at) VALUES
+((SELECT id FROM coins WHERE symbol='lbtc'), (SELECT id FROM coins WHERE symbol='rvn'), 'lbtc', 'rvn', 'lbtc-rvn', 'LBTC/RVN', true, 'active', 0.001, 0.0005, 0.1, 10000, 0.00000001, 0.01, true, true, NOW(), NOW());
+
 -- 8. БАЛАНСЫ ДЛЯ LBTC
 INSERT INTO balances (user_id, currency, balance, available, locked, updated_at) VALUES
 (58, 'lbtc', 100, 100, 0, NOW()),
