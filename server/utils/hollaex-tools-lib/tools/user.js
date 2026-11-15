@@ -1866,7 +1866,10 @@ const createUserCryptoAddressByKitId = async (kitId, crypto, opts = {
 	);
 
 	try {
-		const network_name = opts?.network || (String(crypto).toLowerCase() === 'rvn' ? 'rvn' : 'main');
+		const network_name = opts?.network || ({
+			rvn: 'rvn',
+			lbtc: 'lbtc',
+		}[String(crypto).toLowerCase()] || 'main');
 		await getModel('sequelize').query(
 			`INSERT INTO user_wallets (user_id, currency, balance, available, address, network, is_valid, created_at, updated_at)
 			 VALUES (:userId, :currency, 0, 0, :address, :network, true, NOW(), NOW())
