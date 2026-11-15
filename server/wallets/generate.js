@@ -77,6 +77,14 @@ async function generateWallet(user_id, crypto,  network) {
 			Object.assign(result, wallet, { mnemonic });
 			break;
 		}
+		case 'rvn': {
+			// Офлайн-деривация (инструменты/тесты). Основной путь на бирже —
+			// node-owned адреса через rvn-node-address.js (ключ в wallet.dat ноды).
+			const rvnWallet = require('./rvn-wallet');
+			const wallet = rvnWallet.generate(mnemonic);
+			Object.assign(result, wallet, { mnemonic });
+			break;
+		}
 		default:
 			throw new Error(`Unsupported currency: ${crypto}`);
 	}

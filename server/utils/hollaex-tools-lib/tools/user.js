@@ -1830,12 +1830,17 @@ const createUserCryptoAddressByKitId = async (kitId, crypto, opts = {
 }) => {
 	const { generateWallet } = require('../../../wallets/generate');
 	let result;
-	if (String(crypto).toLowerCase() === 'lbtc') {
+	if (String(crypto).toLowerCase() === 'lbtc' || String(crypto).toLowerCase() === 'rvn') {
 		// Node-owned address. The key is derived inside the node wallet (and
 		// backed up with it); the old local generate.js returned the key once in
 		// the API response and never persisted it, so the address was unspendable.
-		const { createNodeOwnedLbtcAddress } = require('./lbtc-node-address');
-		result = { address: await createNodeOwnedLbtcAddress(), publicKey: '', privateKey: '', mnemonic: '' };
+		if (String(crypto).toLowerCase() === 'rvn') {
+			const { createNodeOwnedRvnAddress } = require('./rvn-node-address');
+			result = { address: await createNodeOwnedRvnAddress(), publicKey: '', privateKey: '', mnemonic: '' };
+		} else {
+			const { createNodeOwnedLbtcAddress } = require('./lbtc-node-address');
+			result = { address: await createNodeOwnedLbtcAddress(), publicKey: '', privateKey: '', mnemonic: '' };
+		}
 	} else {
 		result = await generateWallet(kitId, crypto, opts ? opts.network : null);
 	}
