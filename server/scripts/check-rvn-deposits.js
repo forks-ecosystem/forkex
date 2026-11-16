@@ -245,7 +245,7 @@ async function creditHold(hold, confsNeeded) {
         return false;
     }
 
-    if (confsNeeded < hold.confirmations) {
+    if (hold.confirmations < confsNeeded) {
         log(`hold ${hold.id}: ${hold.confirmations}/${confsNeeded} confirmations, waiting`);
         return false;
     }
@@ -266,7 +266,9 @@ async function creditHold(hold, confsNeeded) {
             return false;
         }
         const h = flipped.rows[0];
-        const amount = String(h.amount);
+        // holds хранит базовые единицы (1e8); balances/deposits/transactions —
+        // дисплей-единицы RVN (как amountText в LBTC-скрипте).
+        const amount = fmt(h.amount);
         const userId = Number(h.user_id);
 
         // Exchange-owned non-float wallets are journalled but never credited —
@@ -327,6 +329,7 @@ async function creditHold(hold, confsNeeded) {
         }
         log(`hold ${hold.id}: credited ${fmt(hold.amount)} RVN to user ${userId}` +
             (h.internal === true ? ' (internal, journal only)' : ''));
+        await client.query('COMMIT');
         return true;
     } catch (e) {
         await client.query('ROLLBACK').catch(() => {});
