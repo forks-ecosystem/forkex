@@ -33,7 +33,7 @@ services:
   # ─── Backend ───────────────────────────────────────────────
   api:
     container_name: forkex-api
-    image: forkex-api:v22
+    image: forkex-api:v23
     build:
       context: .
       dockerfile: Dockerfile
@@ -51,6 +51,7 @@ services:
       - 10010:10010
     networks:
       - forkex-network
+      - rvn-core-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,3 +162,6 @@ networks:
   forkex-network:
     external: true
     name: forkex-network
+  rvn-core-network:
+    external: true
+    name: rvn-core-server-docker_default
