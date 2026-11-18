@@ -36,6 +36,7 @@ module.exports = {
 			{ base_coin_id: kasId, pair_base: 'kas', quote_coin_id: usdtId, pair_2: 'usdt', symbol: 'kas-usdt', name: 'KAS/USDT', active: true, taker_fees: 0.001, maker_fees: 0.0005, min_size: 0.1, max_size: 1000000, increment_size: 0.1, increment_price: 0.01 },
 			{ base_coin_id: trumpId, pair_base: 'trump', quote_coin_id: usdtId, pair_2: 'usdt', symbol: 'trump-usdt', name: 'TRUMP/USDT', active: true, taker_fees: 0.001, maker_fees: 0.0005, min_size: 0.01, max_size: 10000, increment_size: 0.01, increment_price: 0.01 },
 			{ base_coin_id: lbtcId, pair_base: 'lbtc', quote_coin_id: rvnId, pair_2: 'rvn', symbol: 'lbtc-rvn', name: 'LBTC/RVN', active: true, taker_fees: 0.001, maker_fees: 0.0005, min_size: 0.1, max_size: 10000, increment_size: 0.00000001, increment_price: 0.01 },
+			{ base_coin_id: rvnId, pair_base: 'rvn', quote_coin_id: usdtId, pair_2: 'usdt', symbol: 'rvn-usdt', name: 'RVN/USDT', active: true, taker_fees: 0.001, maker_fees: 0.0005, min_size: 1, max_size: 1000000, increment_size: 1, increment_price: 0.0001 },
 		];
 
 		for (const pair of pairs) {
