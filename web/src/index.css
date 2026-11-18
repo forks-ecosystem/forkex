@@ -2602,7 +2602,7 @@ table th {
   .wallet-container .header-wrapper .action_notification-svg {
     padding-top: 7px; }
   .wallet-container .header-wrapper .link {
-    border-right: 1px solid var(--calculated_secondary-border);
+    /* border-right removed per UI request */
     padding-right: 0.5rem;
     padding-left: 0.5rem; }
 
@@ -3623,7 +3623,7 @@ table th {
   .deposit-address-wrapper .deposit-address-field .ant-input-suffix {
     width: 15% !important; }
   .deposit-address-wrapper .deposit-address-field .divider {
-    border-right: 1px solid var(--calculated_secondary-border);
+    /* border-right removed per UI request */
     padding-left: 15%;
     height: 16px;
     margin-top: 4%; }
@@ -6470,12 +6470,12 @@ table th {
     border: 1px solid var(--calculated_secondary-border); }
   .fee-limits-wrapper .account-limits-maker {
     border-left: 1px solid var(--calculated_secondary-border);
-    border-right: 1px solid var(--calculated_secondary-border);
+    /* border-right removed per UI request */
     border-top: 1px solid var(--calculated_secondary-border); }
   .fee-limits-wrapper .account-limits-taker {
     border-bottom: 1px solid var(--calculated_secondary-border);
     border-left: 1px solid var(--calculated_secondary-border);
-    border-right: 1px solid var(--calculated_secondary-border); }
+    /* border-right removed per UI request */ }
   .fee-limits-wrapper .account-limits-coin {
     border-bottom: 1px solid var(--calculated_secondary-border);
     padding: 0.25rem 0.5rem;
@@ -7164,7 +7164,7 @@ table th {
     .trade_tabs-container .trade_tabs-link:hover {
       opacity: 0.5; }
   .trade_tabs-container .link-separator {
-    border-right: 1px solid var(--calculated_secondary-border); }
+    /* border-right removed per UI request */ }
   .trade_tabs-container .trade_tabs-search-field {
     background-color: var(--base_background);
     color: var(--labels_inactive-button);
@@ -10421,7 +10421,7 @@ table th {
     .hollaex-token-wrapper .trade_tabs-link:hover {
       opacity: 0.5; }
   .hollaex-token-wrapper .link-separator {
-    border-right: 1px solid var(--calculated_secondary-border); }
+    /* border-right removed per UI request */ }
   .hollaex-token-wrapper .mt-8 {
     margin-top: 8rem; }
   .hollaex-token-wrapper .pb-6 {
@@ -17488,7 +17488,7 @@ table th {
     font-weight: bolder; }
 
 .direction_ltr .sidebar-row .cell-wrapper:not(:last-child) {
-  border-right: 1px solid var(--calculated_secondary-border); }
+  /* border-right removed per UI request */ }
 
 .direction_rtl .sidebar-row .cell-wrapper:not(:last-child) {
   border-left: 1px solid var(--calculated_secondary-border); }
@@ -20979,7 +20979,7 @@ table th {
   font-size: 1rem; }
 
 .link-separator {
-  border-right: 1px solid var(--calculated_secondary-border);
+  /* border-right removed per UI request */
   height: 15px; }
 
 .sub-header:hover,
@@ -23165,7 +23165,7 @@ table th {
 
 .app-side-bar .app-menu-bar-side {
   background-color: var(--base_wallet-sidebar-and-popup);
-  border-right: 1px solid var(--calculated_secondary-border);
+  /* border-right removed per UI request */
   padding: 20px 16px 0 15px; }
   .app-side-bar .app-menu-bar-side .app-menu-bar-icon {
     width: 20px; }
