@@ -79,6 +79,12 @@ $footer-logo-color: $trade-tabs-inactive-color;
 			.footer-content {
 				.footer-img-wrapper {
 					height: 4rem;
+					.footer-brand-text {
+						font-size: 2rem;
+						font-weight: 700;
+						letter-spacing: 0.05em;
+						margin-left: 0.5rem;
+					}
 				}
 			}
 		}

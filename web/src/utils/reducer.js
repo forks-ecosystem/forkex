@@ -30,7 +30,7 @@ export const modifyPairsData = (pairs, coins) => {
 		const { display_name: pair_base_display, icon_id } =
 			coins[pair_base] || DEFAULT_COIN_DATA;
 		const { display_name: pair_2_display } = coins[pair_2] || DEFAULT_COIN_DATA;
-		const display_name = `${pair_base_display}/${pair_2_display}`;
+		const display_name = `${pair_base_display} - ${pair_2_display}`;
 
 		const normalizedKey = data.symbol || key.toLowerCase().replace('/', '-');
 		normalizedPairs[normalizedKey] = {
@@ -52,7 +52,7 @@ export const modifyBrokerData = (broker, coins) => {
 		const { display_name: pair_base_display, icon_id } =
 			coins[pair_base] || DEFAULT_COIN_DATA;
 		const { display_name: pair_2_display } = coins[pair_2] || DEFAULT_COIN_DATA;
-		const display_name = `${pair_base_display}/${pair_2_display}`;
+		const display_name = `${pair_base_display} - ${pair_2_display}`;
 
 		data.display_name = display_name;
 		data.icon_id = icon_id;
@@ -74,7 +74,7 @@ export const modifyQuickTradeData = (quicktrade, coins) => {
 			coins[pair_2] || DEFAULT_COIN_DATA,
 		];
 
-		data.display_name = `${pair_base_display}/${pair_2_display}`;
+		data.display_name = `${pair_base_display} - ${pair_2_display}`;
 		data.icon_id = icon_id;
 		data.fullname = coins?.[pair_base_display?.toLowerCase()]?.fullname;
 	});
