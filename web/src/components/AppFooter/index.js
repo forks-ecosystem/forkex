@@ -139,7 +139,7 @@ const AppFooter = ({
 										icon={ICONS['EXCHANGE_LOGO']}
 										wrapperClassName="footer-logo"
 									/>
-									<span className="footer-brand-text">Forks-ecosystem</span>
+									<div className="footer-brand-text" style={{ paddingTop: '10px', fontSize: '1.6em', color: '#57b' }}>Forks-ecosystem</div>
 								</div>
 								<div className="footer-txt">{constants.description || ''}</div>
 							</div>
