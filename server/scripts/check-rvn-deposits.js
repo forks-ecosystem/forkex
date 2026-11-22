@@ -329,6 +329,22 @@ async function creditHold(hold, confsNeeded) {
         }
         log(`hold ${hold.id}: credited ${fmt(hold.amount)} RVN to user ${userId}` +
             (h.internal === true ? ' (internal, journal only)' : ''));
+        // Клиентский адрес зеркалит ledger пользователя (как в LBTC-мониторе):
+        // иначе user_wallets.balance обнуляется при сборе в float.
+        if (h.internal !== true) {
+            const bal = await client.query(
+                `SELECT balance, available FROM balances WHERE user_id = $1::int AND currency = $2`,
+                [userId, CURRENCY]
+            );
+            if (bal.rows.length > 0) {
+                await client.query(
+                    `UPDATE user_wallets
+                        SET balance = $1::numeric, available = $2::numeric, updated_at = NOW()
+                      WHERE address = $3 AND currency = $4`,
+                    [bal.rows[0].balance, bal.rows[0].available, hold.address, CURRENCY]
+                );
+            }
+        }
         await client.query('COMMIT');
         return true;
     } catch (e) {
