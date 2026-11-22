@@ -178,6 +178,19 @@ const performWithdrawal = (req, res) => {
 					),
 					withdrawal
 				]);
+			} else if (withdrawal.currency === 'rvn') {
+				// RVN — локальная монета: вывод через агент rvn-core (node
+				// подписывает), минуя облачный HollaEx API.
+				const rvnWithdraw = require('../../utils/rvn-withdraw-local');
+				return all([
+					rvnWithdraw.processWithdrawal(
+						withdrawal.user_id,
+						withdrawal.address,
+						withdrawal.amount,
+						withdrawal.fee_markup
+					),
+					withdrawal
+				]);
 			} else {
 				// blockchain type to sent to the network
 				return all([
