@@ -55,7 +55,7 @@ async function processWithdrawal(userId, address, amount, fee = 0) {
 	if (!(amountNum > 0)) throw new Error('amount must be positive');
 
 	// 1. Отправка через агента (нода подписывает, ключей у нас нет).
-	const { txid, feeBase } = await agentCall('POST', '/api/chain/rvn/send', {
+	const { txid, fee: feeBase } = await agentCall('POST', '/api/chain/rvn/send', {
 		from: HOT_ADDRESS,
 		to: address,
 		amount: Math.round(amountNum * BASE),
@@ -68,8 +68,8 @@ async function processWithdrawal(userId, address, amount, fee = 0) {
 		 WHERE user_id = :userId AND currency = :currency AND (balance - :amount - :fee) >= 0`,
 		{ replacements: { amount: amountNum, fee: actualFee, userId, currency: CURRENCY }, type: QueryTypes.UPDATE }
 	);
-	// sequelize.query для UPDATE возвращает [result, metadata]; rowCount в metadata
-	const rowCount = (upd && upd[1] && upd[1].rowCount) || 0;
+	// sequelize.query для UPDATE возвращает [rows, rowCount] (rowCount — число, не объект)
+	const rowCount = (typeof upd[1] === 'number') ? upd[1] : (upd[1] && upd[1].rowCount) || 0;
 	if (rowCount !== 1) {
 		throw new Error(`balance debit for user ${userId} touched ${rowCount} rows, expected 1 (need ${amountNum + actualFee} RVN)`);
 	}
