@@ -50,8 +50,9 @@ function agentCall(method, path, body) {
 	});
 }
 
-async function processWithdrawal(userId, address, amount, fee = 0) {
+async function processWithdrawal(userId, address, amount, exchangeFee = 0) {
 	const amountNum = Number(amount);
+	const exchangeFeeNum = Number(exchangeFee) || 0;
 	if (!(amountNum > 0)) throw new Error('amount must be positive');
 
 	// 1. Отправка через агента (нода подписывает, ключей у нас нет).
@@ -60,32 +61,33 @@ async function processWithdrawal(userId, address, amount, fee = 0) {
 		to: address,
 		amount: Math.round(amountNum * BASE),
 	});
-	const actualFee = (Number(feeBase) || 0) / BASE;
+	const networkFeeNum = (Number(feeBase) || 0) / BASE;
+	const totalFee = networkFeeNum + exchangeFeeNum;
 
-	// 2. Дебет баланса пользователя (rowCount обязателен).
+	// 2. Дебет баланса пользователя (amount + network fee + exchange fee).
 	const upd = await sequelize.query(
-		`UPDATE balances SET balance = balance - :amount - :fee, available = available - :amount - :fee, updated_at = NOW()
-		 WHERE user_id = :userId AND currency = :currency AND (balance - :amount - :fee) >= 0`,
-		{ replacements: { amount: amountNum, fee: actualFee, userId, currency: CURRENCY }, type: QueryTypes.UPDATE }
+		`UPDATE balances SET balance = balance - :total, available = available - :total, updated_at = NOW()
+		 WHERE user_id = :userId AND currency = :currency AND (balance - :total) >= 0`,
+		{ replacements: { total: amountNum + totalFee, userId, currency: CURRENCY }, type: QueryTypes.UPDATE }
 	);
 	// sequelize.query для UPDATE возвращает [rows, rowCount] (rowCount — число, не объект)
 	const rowCount = (typeof upd[1] === 'number') ? upd[1] : (upd[1] && upd[1].rowCount) || 0;
 	if (rowCount !== 1) {
-		throw new Error(`balance debit for user ${userId} touched ${rowCount} rows, expected 1 (need ${amountNum + actualFee} RVN)`);
+		throw new Error(`balance debit for user ${userId} touched ${rowCount} rows, expected 1 (need ${amountNum + totalFee} RVN)`);
 	}
 
 	// 3. Запись транзакции.
 	await sequelize.query(
 		`INSERT INTO transactions (user_id, type, amount, currency, status, fee, fee_currency, description, reference_id, tx_hash, address, network, metadata, created_at, updated_at)
 		 VALUES (:userId, 'withdrawal', :amount, :currency, 'completed', :fee, :currency, 'On-chain RVN withdrawal', NULL, :txid, :address, 'rvn', '{}', NOW(), NOW())`,
-		{ replacements: { userId, amount: amountNum, currency: CURRENCY, fee: actualFee, txid, address }, type: QueryTypes.INSERT }
+		{ replacements: { userId, amount: amountNum, currency: CURRENCY, fee: totalFee, txid, address }, type: QueryTypes.INSERT }
 	);
 
 	return {
 		transaction_id: txid,
-		fee: actualFee,
-		network_fee: actualFee,
-		exchange_fee: 0
+		fee: totalFee,
+		network_fee: networkFeeNum,
+		exchange_fee: exchangeFeeNum
 	};
 }
 
