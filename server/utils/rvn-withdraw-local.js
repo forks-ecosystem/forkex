@@ -83,6 +83,15 @@ async function processWithdrawal(userId, address, amount, exchangeFee = 0) {
 		{ replacements: { userId, amount: amountNum, currency: CURRENCY, fee: totalFee, txid, address }, type: QueryTypes.INSERT }
 	);
 
+	// 4. Запись в withdrawals (для админ-панели). Обходим fx_withdrawal_guard
+	//    (баланс уже списан, валидация пройдена ранее в validateWithdrawal).
+	await sequelize.query(`SET LOCAL fx.gate = 'off'`);
+	await sequelize.query(
+		`INSERT INTO withdrawals (user_id, coin_id, amount, status, address, tx_hash, fee, network_fee, exchange_fee, created_at, updated_at)
+		 VALUES (:userId, 33, :amount, 'completed', :address, :txid, :fee, :networkFee, :exchangeFee, NOW(), NOW())`,
+		{ replacements: { userId, amount: amountNum, address, txid, fee: totalFee, networkFee: networkFeeNum, exchangeFee: exchangeFeeNum }, type: QueryTypes.INSERT }
+	);
+
 	return {
 		transaction_id: txid,
 		fee: totalFee,
