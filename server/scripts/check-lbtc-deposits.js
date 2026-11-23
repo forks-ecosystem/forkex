@@ -965,6 +965,7 @@ async function reconcileBotBalances() {
                FROM balances b
                JOIN w ON w.user_id = b.user_id
               WHERE b.currency = $2 AND b.balance IS DISTINCT FROM w.balance
+                AND w.balance > 0
               ORDER BY b.user_id`,
             [RECONCILE_USERS, CURRENCY]
         );
