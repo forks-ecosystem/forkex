@@ -86,7 +86,9 @@ class OrdersWrapper extends Component {
 		this.setState({ cancelDelayData: this.state.cancelDelayData.concat(id) });
 		const timeoutId = setTimeout(() => {
 			cancelOrder(id, settings).then(() => {
-				fetchOpenOrders(pair);
+				setTimeout(() => fetchOpenOrders(pair), 500);
+			}).catch(() => {
+				setTimeout(() => fetchOpenOrders(pair), 500);
 			});
 			settings.notification.popup_order_canceled &&
 				orderCancelNotification(activeOrders, id, coins);
