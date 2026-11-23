@@ -55,6 +55,7 @@ class OrdersWrapper extends Component {
 			settings,
 			cancelAllOrders,
 			activeOrders,
+			fetchOpenOrders,
 		} = this.props;
 		let cancelDelayData = [];
 		activeOrders.forEach(({ id }) => {
@@ -62,7 +63,9 @@ class OrdersWrapper extends Component {
 		});
 		this.setState({ cancelDelayData });
 		const timeoutId = setTimeout(() => {
-			cancelAllOrders(activeOrdersMarket, settings);
+			cancelAllOrders(activeOrdersMarket, settings).then(() => {
+				fetchOpenOrders(activeOrdersMarket);
+			});
 			this.onCloseDialog();
 			settings.notification.popup_order_canceled &&
 				this.props.allOrderCancelNotification(activeOrders);
@@ -77,10 +80,14 @@ class OrdersWrapper extends Component {
 			activeOrders,
 			coins,
 			orderCancelNotification,
+			pair,
+			fetchOpenOrders,
 		} = this.props;
 		this.setState({ cancelDelayData: this.state.cancelDelayData.concat(id) });
 		const timeoutId = setTimeout(() => {
-			cancelOrder(id, settings);
+			cancelOrder(id, settings).then(() => {
+				fetchOpenOrders(pair);
+			});
 			settings.notification.popup_order_canceled &&
 				orderCancelNotification(activeOrders, id, coins);
 		}, 700);
