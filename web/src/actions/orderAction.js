@@ -35,7 +35,7 @@ export function removeOrder(ids = {}) {
 
 export const submitOrder = (order) => axios.post('/order', order);
 export const cancelOrder = (orderId, settings) => (dispatch) => {
-	axios
+	return axios
 		.delete(`/order?order_id=${orderId}`)
 		.then((data) => {
 			dispatch({
@@ -50,8 +50,11 @@ export const cancelOrder = (orderId, settings) => (dispatch) => {
 					content: STRINGS['CANCEL_SUCCESS_TEXT'],
 				},
 			});
+			return data;
 		})
-		.catch((err) => {});
+		.catch((err) => {
+			throw err;
+		});
 };
 
 export const cancelAllOrders = (symbol = '', settings) => (dispatch) => {
