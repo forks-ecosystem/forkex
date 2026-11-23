@@ -54,6 +54,8 @@ import withConfig from 'components/ConfigProvider/withConfig';
 import { getViewport } from 'helpers/viewPort';
 import strings from 'config/localizedStrings';
 import { formatCurrency } from 'utils';
+import { requestAuthenticated } from 'utils/request';
+import { setUserOrders } from 'actions/orderAction';
 import { flipPair } from 'containers/QuickTrade/components/utils';
 
 const GridLayout = WidthProvider(RGL);
@@ -309,7 +311,19 @@ class Trade extends PureComponent {
 
 	onSubmitOrder = (values) => {
 		return submitOrder(values)
-			.then((body) => {})
+			.then((body) => {
+				// Обновить список открытых ордеров после успешной отправки
+				const symbol = values.symbol || this.props.pair;
+				requestAuthenticated(`/orders?symbol=${symbol}&open=true&limit=50`)
+					.then((res) => {
+						const data = res?.data?.data || res?.data || [];
+						if (Array.isArray(data)) {
+							this.props.setUserOrders(data);
+						}
+					})
+					.catch(() => {});
+				return body;
+			})
 			.catch((err) => {
 				const _error =
 					err.response && err.response.data
@@ -1159,6 +1173,7 @@ const mapStateToProps = (state) => {
 
 	const mapDispatchToProps = (dispatch) => ({
 	getUserTrades: bindActionCreators(getUserTrades, dispatch),
+	setUserOrders: bindActionCreators(setUserOrders, dispatch),
 	setNotification: bindActionCreators(setNotification, dispatch),
 	changePair: bindActionCreators(changePair, dispatch),
 	change: bindActionCreators(change, dispatch),
