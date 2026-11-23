@@ -5,7 +5,8 @@ import { bindActionCreators } from 'redux';
 import Filters from './Filters';
 import TradeBlock from './TradeBlock';
 import ActiveOrders from './ActiveOrders';
-import { cancelOrder, cancelAllOrders } from 'actions/orderAction';
+import { cancelOrder, cancelAllOrders, setUserOrders } from 'actions/orderAction';
+import { requestAuthenticated } from 'utils/request';
 import { isLoggedIn } from 'utils/token';
 import {
 	ActionNotification,
@@ -28,6 +29,13 @@ class OrdersWrapper extends Component {
 			showCancelAllModal: false,
 		};
 		this.cancelTimeouts = [];
+	}
+
+	componentDidMount() {
+		const { pair, fetchOpenOrders } = this.props;
+		if (isLoggedIn()) {
+			fetchOpenOrders(pair);
+		}
 	}
 
 	componentWillUnmount() {
@@ -221,6 +229,15 @@ const mapDispatchToProps = (dispatch) => ({
 	cancelOrder: bindActionCreators(cancelOrder, dispatch),
 	cancelAllOrders: bindActionCreators(cancelAllOrders, dispatch),
 	setActiveOrdersMarket: bindActionCreators(setActiveOrdersMarket, dispatch),
+	fetchOpenOrders: (symbol) => {
+		const query = symbol ? `?symbol=${symbol}&open=true&limit=50` : '?open=true&limit=50';
+		return requestAuthenticated(`/orders${query}`).then((res) => {
+			const data = res?.data?.data || res?.data || [];
+			if (Array.isArray(data)) {
+				dispatch(setUserOrders(data));
+			}
+		});
+	},
 });
 
 export default connect(
