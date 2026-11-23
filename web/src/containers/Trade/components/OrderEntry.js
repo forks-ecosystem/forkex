@@ -572,7 +572,7 @@ class OrderEntry extends Component {
 				step: increment_size,
 				min: min_size,
 				max: max_size,
-				validate: [required, minValue(min_size), maxValue(max_size)],
+				validate: [required, minValue(min_size || 0.00000001), maxValue(max_size)],
 				currency: pair_base_display,
 				setRef: this.props.setSizeRef,
 				onKeyDown: (event) => this.handleKey(event),
