@@ -130,6 +130,7 @@ const EntryOrderForm = reduxForm({
 	form: FORM_NAME,
 	validate,
 	enableReinitialize: true,
+	destroyOnUnmount: true,
 	// onSubmitSuccess: (result, dispatch) => dispatch(reset(FORM_NAME)),
 })(Form);
 
