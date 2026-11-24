@@ -245,12 +245,15 @@ class Trade extends PureComponent {
 		document.addEventListener('resetlayout', this.onResetLayout);
 	}
 
-	componentDidUpdate() {
+	componentDidUpdate(prevProps) {
 		const {
 			params: { pair },
 			pairs,
 		} = this.props;
 		const flippedPair = flipPair(pair);
+		if (pair !== prevProps.params?.pair) {
+			this.props.changePair(pair);
+		}
 		if (pair && pairs && flippedPair) {
 			if (Object.keys(pairs)?.includes(flippedPair)) {
 				this.props.router.push(`/trade/${flippedPair}`);
@@ -856,6 +859,7 @@ class Trade extends PureComponent {
 							tool={key}
 						>
 							<OrderEntry
+								key={pair}
 								focusOnSizeInput={this.focusOnSizeInput}
 								submitOrder={this.onSubmitOrder}
 								openCheckOrder={this.openCheckOrder}
