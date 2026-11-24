@@ -94,6 +94,15 @@ class OrderEntry extends Component {
 
 	UNSAFE_componentWillReceiveProps(nextProps) {
 		const { pair_2, pair_base } = this.props;
+		if (nextProps.pair !== this.props.pair) {
+			// Сбросить цену и размер при смене пары
+			const { change } = this.props;
+			if (change) {
+				change('price', '');
+				change('size', '');
+				change('stop', '');
+			}
+		}
 		if (
 			nextProps.size !== this.props.size ||
 			nextProps.side !== this.props.side ||
