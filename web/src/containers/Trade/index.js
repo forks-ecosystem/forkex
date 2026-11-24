@@ -251,8 +251,7 @@ class Trade extends PureComponent {
 			pairs,
 		} = this.props;
 		if (pair && pair !== prevProps?.params?.pair) {
-			window.location.href = `/trade/${pair}`;
-			return;
+			this.props.changePair(pair);
 		}
 		const flippedPair = flipPair(pair);
 		if (pair && pairs && flippedPair) {
