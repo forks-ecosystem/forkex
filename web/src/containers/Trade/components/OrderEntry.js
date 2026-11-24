@@ -290,9 +290,10 @@ class OrderEntry extends Component {
 		delete order.order_type;
 
 		return this.props.submitOrder(order).then((body) => {
-			if (body?.message) {
+			const msg = body?.data?.message || body?.message;
+			if (msg) {
 				notification.success({
-					message: body.message,
+					message: msg,
 					placement: 'bottomRight',
 					duration: 3,
 				});
