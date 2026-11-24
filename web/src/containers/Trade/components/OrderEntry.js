@@ -73,6 +73,19 @@ class OrderEntry extends Component {
 		}
 	}
 
+	componentDidUpdate(prevProps) {
+		if (prevProps.pair !== this.props.pair) {
+			// При смене пары сбрасываем цену и размер
+			const { change } = this.props;
+			if (change) {
+				change('price', '');
+				change('size', '');
+				change('stop', '');
+			}
+			this.generateFormValues(this.props);
+		}
+	}
+
 	UNSAFE_componentWillReceiveProps(nextProps) {
 		const { pair_2, pair_base } = this.props;
 		if (
