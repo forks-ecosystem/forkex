@@ -324,6 +324,7 @@ const reducer = (state = INITIAL_STATE, { type, payload = {} }) => {
 			return {
 				...state,
 				pair: payload.pair,
+				lastPrice: 0,
 				activeOrdersMarket: payload.pair,
 				recentTradesMarket: payload.pair,
 			};
