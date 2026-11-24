@@ -179,6 +179,7 @@ class Trade extends PureComponent {
 			layout: LAYOUT.length > 0 ? LAYOUT : defaultLayout,
 			rowHeight,
 			refreshKey: 0,
+			tradeResetKey: 0,
 			refreshDepthChart: 0,
 			refreshRecentTrade: 0,
 			refreshOpenOrder: 0,
@@ -252,6 +253,7 @@ class Trade extends PureComponent {
 		} = this.props;
 		if (pair && pair !== prevProps?.params?.pair) {
 			this.props.changePair(pair);
+			this.setState((prev) => ({ tradeResetKey: (prev.tradeResetKey || 0) + 1 }));
 		}
 		const flippedPair = flipPair(pair);
 		if (pair && pairs && flippedPair) {
@@ -1086,6 +1088,7 @@ class Trade extends PureComponent {
 					<div className={classnames('trade-container', 'd-flex')}>
 						<EventListener target="window" onResize={this.onResize} />
 						<GridLayout
+							key={this.state.tradeResetKey}
 							className="layout w-100"
 							layout={layout}
 							onLayoutChange={(layout) => this.onLayoutChange(layout)}
