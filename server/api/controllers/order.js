@@ -23,6 +23,9 @@ const createOrder = (req, res) => {
 
 	const user_id = req.auth.sub.id;
 	let order = req.swagger.params.order.value;
+	if (!order.size || Number(order.size) <= 0) {
+		return res.status(400).json({ message: 'Order size must be greater than 0' });
+	}
 	const opts = {
 		additionalHeaders: {
 			'x-forwarded-for': req.headers['x-forwarded-for']

@@ -33,7 +33,7 @@ services:
   # ─── Backend ───────────────────────────────────────────────
   api:
     container_name: forkex-api
-    image: forkex-api:v24
+    image: forkex-api:v25
     build:
       context: .
       dockerfile: Dockerfile
@@ -99,7 +99,7 @@ services:
   # ─── Frontend ──────────────────────────────────────────────
   web:
     container_name: forkex-web
-    image: forkex-web:v16
+    image: forkex-web:v17
     build:
       context: ./web
       dockerfile: docker/Dockerfile
