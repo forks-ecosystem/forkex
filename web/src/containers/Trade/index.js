@@ -251,9 +251,7 @@ class Trade extends PureComponent {
 			pairs,
 		} = this.props;
 		if (pair && pair !== prevProps?.params?.pair) {
-			// Полная перезагрузка страницы при смене пары — надёжнее SPA-сброса.
-			window.location.href = `/trade/${pair}`;
-			return;
+			this.props.changePair(pair);
 		}
 		const flippedPair = flipPair(pair);
 		if (pair && pairs && flippedPair) {
