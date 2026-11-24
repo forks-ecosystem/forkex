@@ -27,6 +27,7 @@ import {
 	normalizeFloat,
 } from 'components/Form/validations';
 import { Loader, Tooltip, EditWrapper } from 'components';
+import { notification } from 'antd';
 import { takerFee, DEFAULT_COIN_DATA } from 'config/constants';
 
 import STRINGS from 'config/localizedStrings';
@@ -263,7 +264,7 @@ class OrderEntry extends Component {
 
 		const order = {
 			...values,
-			size: formatNumber(values.size || size || 0, getDecimals(increment_size)),
+			size: formatNumber(values.size || size || this.state.formValues?.size || 0, getDecimals(increment_size)),
 			symbol: this.props.pair,
 		};
 
@@ -288,7 +289,14 @@ class OrderEntry extends Component {
 		delete order.post_only;
 		delete order.order_type;
 
-		return this.props.submitOrder(order).then(() => {
+		return this.props.submitOrder(order).then((body) => {
+			if (body?.message) {
+				notification.success({
+					message: body.message,
+					placement: 'bottomRight',
+					duration: 3,
+				});
+			}
 			if (
 				values.type === 'market' &&
 				!values.stop &&
