@@ -71,6 +71,12 @@ class OrderEntry extends Component {
 		if (this.props.pair_base) {
 			this.generateFormValues(this.props);
 		}
+		const { change } = this.props;
+		if (change) {
+			change('price', '');
+			change('size', '');
+			change('stop', '');
+		}
 	}
 
 	componentDidUpdate(prevProps) {
