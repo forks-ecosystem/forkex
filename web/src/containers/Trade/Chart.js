@@ -242,6 +242,18 @@ class TVChartContainer extends React.PureComponent {
 	}
 
 	UNSAFE_componentWillReceiveProps(nextProps) {
+		if (nextProps.symbol !== this.props.symbol) {
+			// Смена пары: уничтожаем старый виджет и создаём новый
+			try {
+				if (this.tvWidget !== null && this.tvWidget._ready) {
+					this.tvWidget.remove();
+				}
+			} catch (e) {}
+			this.tvWidget = null;
+			this.ref = null;
+			this.updateChart(nextProps);
+			return;
+		}
 		if (this.props.activeTheme !== nextProps.activeTheme) {
 			this.updateChart(nextProps);
 		} else if (
