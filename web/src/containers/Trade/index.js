@@ -251,8 +251,9 @@ class Trade extends PureComponent {
 			params: { pair },
 			pairs,
 		} = this.props;
-		if (pair && pair !== prevProps?.params?.pair) {
-			this.props.changePair(pair);
+		const urlPair = this.props.params?.pair;
+		if (urlPair && urlPair !== prevProps?.params?.pair) {
+			this.props.changePair(urlPair);
 		}
 		const flippedPair = flipPair(pair);
 		if (pair && pairs && flippedPair) {
@@ -860,7 +861,7 @@ class Trade extends PureComponent {
 							tool={key}
 						>
 							<OrderEntry
-								key={this.props.routeParams?.pair || pair}
+								key={this.props.params?.pair || pair}
 								focusOnSizeInput={this.focusOnSizeInput}
 								submitOrder={this.onSubmitOrder}
 								openCheckOrder={this.openCheckOrder}
