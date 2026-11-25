@@ -53,7 +53,7 @@ class MobileChart extends Component {
 					alignChildTitle={true}
 				>
 					{pair && chartHeight > 0 && (
-						<TVChartContainer symbol={symbol} pairData={pairData} />
+						<TVChartContainer key={pair} symbol={symbol} pairData={pairData} />
 					)}
 				</TradeBlock>
 				<TradeBlock

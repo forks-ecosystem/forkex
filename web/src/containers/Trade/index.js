@@ -820,9 +820,9 @@ class Trade extends PureComponent {
 						>
 							{pair && chartHeight > 0 && (
 								<TVChartContainer
+									key={pair}
 									symbol={symbol}
 									pairData={pairData}
-									key={this.state.refreshKey}
 								/>
 							)}
 						</TradeBlock>

@@ -83,6 +83,7 @@ export default function reducer(state = INITIAL_STATE, { payload, type }) {
 				...state,
 				symbol: payload.pair,
 				pair: payload.pair,
+				chart_last_close: 0,
 			};
 		// getOrderbook
 		case 'GET_ORDERBOOK_PENDING':
