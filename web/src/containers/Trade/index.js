@@ -214,13 +214,17 @@ class Trade extends PureComponent {
 			tools,
 			recentTradesMarket,
 			getUserTrades,
-			routeParams,
 		} = this.props;
 
-		if (nextProps.routeParams.pair !== routeParams.pair) {
-			this.setSymbol(nextProps.routeParams.pair);
-			this.subscribe(nextProps.routeParams.pair);
-			this.unsubscribe(routeParams.pair);
+		const nextPair = nextProps?.params?.pair || nextProps?.routeParams?.pair;
+		const currPair = this.props?.params?.pair || this.props?.routeParams?.pair;
+		if (nextPair && nextPair !== currPair) {
+			this.setSymbol(nextPair);
+			this.initializeOrderbookWs(nextPair, getToken());
+			if (nextProps.routeParams) {
+				this.subscribe(nextPair);
+				this.unsubscribe(currPair);
+			}
 		} else if (nextProps.recentTradesMarket !== recentTradesMarket) {
 			if (isLoggedIn()) {
 				getUserTrades({ symbol: nextProps.recentTradesMarket });
