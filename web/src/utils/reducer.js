@@ -26,7 +26,8 @@ export const overWriteCoinNames = (coins) => {
 export const modifyPairsData = (pairs, coins) => {
 	const normalizedPairs = {};
 	Object.entries(pairs).forEach(([key, data]) => {
-		const { pair_base, pair_2 } = data;
+		const pair_base = data.pair_base || data.base;
+		const pair_2 = data.pair_2 || data.quote;
 		const { display_name: pair_base_display, icon_id } =
 			coins[pair_base] || DEFAULT_COIN_DATA;
 		const { display_name: pair_2_display } = coins[pair_2] || DEFAULT_COIN_DATA;
@@ -35,6 +36,8 @@ export const modifyPairsData = (pairs, coins) => {
 		const normalizedKey = data.symbol || key.toLowerCase().replace('/', '-');
 		normalizedPairs[normalizedKey] = {
 			...data,
+			pair_base,
+			pair_2,
 			pair_base_display,
 			pair_2_display,
 			display_name,
