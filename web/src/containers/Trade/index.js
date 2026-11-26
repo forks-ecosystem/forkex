@@ -824,7 +824,7 @@ class Trade extends PureComponent {
 							onHandleRefresh={() => this.onHandleRefresh('refresh chart')}
 						>
 							{pair && chartHeight > 0 && (
-								<div key={pair}>
+								<div key={pair} style={{ height: '100%', width: '100%' }}>
 									<TVChartContainer
 										symbol={symbol}
 										pairData={pairData}
