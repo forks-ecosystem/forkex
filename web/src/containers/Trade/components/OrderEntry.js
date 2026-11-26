@@ -26,7 +26,7 @@ import {
 	step,
 	normalizeFloat,
 } from 'components/Form/validations';
-import { Loader, Tooltip, EditWrapper } from 'components';
+import { Tooltip, EditWrapper } from 'components';
 import { notification } from 'antd';
 import { takerFee, DEFAULT_COIN_DATA } from 'config/constants';
 
@@ -678,10 +678,8 @@ class OrderEntry extends Component {
 		const pairBase = coins[pair_base] || DEFAULT_COIN_DATA;
 		const currencyName = pairBase.fullname;
 
-		if (isLoggedIn() && balance && Object.keys(balance).length > 1 && !balance.hasOwnProperty(`${pair_2}_balance`)) {
-			return <Loader relative={true} background={false} />;
-		}
-
+		// Баланс может содержать только часть валют (локальные lbtc/rvn),
+		// поэтому отсутствие ключа не блокирует форму — показываем 0.
 		return (
 			<div
 				className={classnames(
