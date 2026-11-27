@@ -37,6 +37,11 @@ const HOT_USER_ID = Number(process.env.USDT_HOT_USER_ID || 1);
 const DEFAULT_GAS_LIMIT = Number(process.env.USDT_GAS_LIMIT || 120000);
 const DEFAULT_GAS_GWEI = Number(process.env.USDT_GAS_GWEI || 3);
 
+// Customer deposit addresses are plain EOAs; a sweep must be signed by the
+// key that owns the address, not by the hot wallet. usdt-regen-addresses.js
+// writes these keys to wallet-backups, never to the exchange DB.
+const CUSTOMER_KEYS_DIR = process.env.USDT_CUSTOMER_KEYS_DIR || '/etc/lbtc-ops/wallet-backups';
+
 const ERC20_ABI = [
     'function transfer(address to, uint256 amount) returns (bool)',
     'function balanceOf(address owner) view returns (uint256)',
@@ -257,6 +262,35 @@ async function cmdSend(recipientArg, amountArg, feeArg = '0') {
 //   - gas is funded from the hot wallet FIRST, and the USDT transfer happens
 //     on a later run once the gas has confirmed — so a run never leaves an
 //     address half-processed without a trail.
+//
+// The USDT transfer itself must be signed by the deposit address key: a hot
+// wallet signature would try to move the hot wallet's own balance and revert.
+function loadCustomerKeys() {
+    let file = process.env.USDT_CUSTOMER_KEYS_FILE;
+    if (!file) {
+        let files = [];
+        try {
+            files = fs.readdirSync(CUSTOMER_KEYS_DIR)
+                .filter((f) => /^usdt-customer-keys-.*\.json$/.test(f))
+                .sort();
+        } catch (e) {
+            console.log(`  cannot read ${CUSTOMER_KEYS_DIR}: ${e.message}`);
+        }
+        if (files.length) file = `${CUSTOMER_KEYS_DIR}/${files[files.length - 1]}`;
+    }
+    if (!file) {
+        console.log('  no usdt-customer-keys-*.json found: sweeps cannot be signed');
+        return new Map();
+    }
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const keys = new Map();
+    for (const w of data.wallets || []) {
+        if (w.address && w.privateKey) keys.set(String(w.address).toLowerCase(), w.privateKey);
+    }
+    console.log(`  keys: ${keys.size} from ${file}`);
+    return keys;
+}
+
 async function cmdSweep(minArg) {
     const minBase = amountToBase(minArg || String(process.env.USDT_SWEEP_MIN || '10'));
     const { wallet, token, provider } = hotWallet();
@@ -278,6 +312,7 @@ async function cmdSweep(minArg) {
         await db.end();
     }
     console.log(`Sweep: ${rows.length} customer address(es), min ${fmt(Number(minBase) / 10 ** USDT_DECIMALS)} USDT`);
+    const keys = loadCustomerKeys();
     const hotGasNeeded = ethers.utils.parseUnits('0.0004', 'ether'); // ~2 sends of headroom
     for (const r of rows) {
         const address = r.address;
@@ -297,8 +332,15 @@ async function cmdSweep(minArg) {
             await cmdEthSendInternal(address, need);
             continue;
         }
+        const key = keys.get(address.toLowerCase());
+        if (!key) {
+            console.log(`  ${address}: ${amountText} USDT — no deposit-address key, skipped`);
+            continue;
+        }
         const gasPrice = ethers.utils.parseUnits(String(Math.max(Number(ethers.utils.formatUnits(await provider.getGasPrice(), 'gwei')) * 1.2, DEFAULT_GAS_GWEI).toFixed(2)), 'gwei');
-        const tx = await token.connect(wallet).transfer(hotAddress, raw, { gasLimit: DEFAULT_GAS_LIMIT, gasPrice });
+        const signer = new ethers.Wallet(key, provider);
+        const customerToken = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, signer);
+        const tx = await customerToken.transfer(hotAddress, raw, { gasLimit: DEFAULT_GAS_LIMIT, gasPrice });
         await tx.wait(1);
         console.log(`  ${address}: swept ${amountText} USDT -> hot ${tx.hash}`);
         const db2 = await getDb();
